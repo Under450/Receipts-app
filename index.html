@@ -1,28 +1,43 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8">
   <title>HMRC Receipt Extractor</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="style.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
+  <nav class="navbar">
+    <a href="index.html">Dashboard</a>
+    <a href="rules.html">Rules</a>
+    <a href="instructions.html">Instructions</a>
+    <a href="about.html">About</a>
+  </nav>
+
   <h1>HMRC Receipt Extractor</h1>
 
   <div class="upload-box">
-    <!-- Take Photo (opens Camera on iPhone) -->
-    <input id="cameraInput" type="file" accept="image/*;capture=camera" capture="environment" style="display:none" />
+    <!-- Take Photo -->
+    <input id="cameraInput" type="file"
+           accept="image/*;capture=camera" capture="environment"
+           style="display:none"
+           onchange="onCameraSelect(this.files)" />
     <button onclick="document.getElementById('cameraInput').click()">📷 Take Photo</button>
 
-    <!-- Choose from Library (opens Photos/files) -->
-    <input id="libraryInput" type="file" accept="image/*" multiple style="display:none" />
+    <!-- Photo Library -->
+    <input id="libraryInput" type="file"
+           accept="image/*" multiple
+           style="display:none"
+           onchange="onLibrarySelect(this.files)" />
     <button onclick="document.getElementById('libraryInput').click()">🖼 Choose from Library</button>
 
     <button onclick="extractText()">Extract</button>
     <button onclick="exportCSV()">Export CSV</button>
     <button onclick="exportPDF()">Export PDF Report</button>
     <button onclick="clearDemo()">Clear Demo Data</button>
+
+    <div id="status" style="margin-top:8px; font-weight:bold;">Ready</div>
+    <img id="preview" alt="preview" style="display:none; margin-top:8px; max-width:240px; border:1px solid #333;">
   </div>
 
   <table id="receiptTable">
@@ -33,21 +48,20 @@
       </tr>
     </thead>
     <tbody>
-      <tr>
-        <td>Demo Store</td><td>GB123456</td><td>2025-09-03</td>
-        <td>Office Supplies</td><td>100</td><td>20</td><td>120</td><td>Card</td><td>✔</td><td>OK</td>
-      </tr>
+      <tr><td colspan="10" style="text-align:center;">No data yet</td></tr>
     </tbody>
     <tfoot>
       <tr>
         <td colspan="4">Totals</td>
-        <td id="netTotal">100</td><td id="vatTotal">20</td><td id="grossTotal">120</td>
+        <td id="totalNet">0</td>
+        <td id="totalVAT">0</td>
+        <td id="totalGross">0</td>
         <td colspan="3"></td>
       </tr>
     </tfoot>
   </table>
 
-  <div id="charts">
+  <div class="charts">
     <canvas id="pieChart"></canvas>
     <canvas id="barChart"></canvas>
   </div>
