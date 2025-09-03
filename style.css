@@ -1,0 +1,12 @@
+body{font-family:Arial,sans-serif;background:#121212;color:#daa520;margin:0}
+h1{text-align:center;margin:20px 0}
+.upload-box{border:2px dashed #daa520;padding:15px;text-align:center;margin:20px auto;width:90%;max-width:700px;background:#1e1e1e}
+table{width:92%;margin:20px auto;border-collapse:collapse;background:#1e1e1e}
+th,td{border:1px solid #444;padding:8px;text-align:center;color:#ddd}
+th{background:#daa520;color:#121212}
+tfoot{font-weight:bold}
+button{background:#daa520;color:#121212;border:none;padding:9px 12px;margin:6px;cursor:pointer;border-radius:4px}
+button:hover{background:#fff;color:#121212}
+#charts{display:flex;justify-content:space-around;margin:30px;flex-wrap:wrap}
+canvas{background:#1e1e1e;padding:10px;border:1px solid #333;margin:10px}
+nav{display:none} /* hide any leftover nav if present */
