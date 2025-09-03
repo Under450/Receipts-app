@@ -1,49 +1,81 @@
-/* ---------- Image selection (Camera / Library) ---------- */
-function handleFiles(fileList){
-  if(!fileList || !fileList.length) return;
-  const f = fileList[0];
+/* ---------- Status + Preview ---------- */
+function setStatus(msg){
+  document.getElementById('status').textContent = msg;
+}
 
-  // Preview/read as DataURL (ready for OCR)
+function handleFiles(fileList){
+  if(!fileList || !fileList.length){ setStatus('No file selected'); return; }
+  const f = fileList[0];
+  setStatus(`Loading: ${f.name || 'image'}`);
   const r = new FileReader();
   r.onload = () => {
-    // r.result is a base64 dataURL – pass to OCR when you wire Tesseract
-    alert('Image selected. Ready for OCR.');
+    const img = document.getElementById('preview');
+    img.src = r.result;    // DataURL stored for OCR later
+    img.style.display = 'block';
+    setStatus('Image loaded. Ready for OCR.');
   };
+  r.onerror = () => setStatus('Could not read file');
   r.readAsDataURL(f);
 }
 
-// Attach listeners once DOM is ready
-document.addEventListener('change', (e)=>{
-  if(e.target.id === 'cameraInput')  handleFiles(e.target.files);
-  if(e.target.id === 'libraryInput') handleFiles(e.target.files);
-});
+function onCameraSelect(files){ handleFiles(files); }
+function onLibrarySelect(files){ handleFiles(files); }
 
-/* ---------- Buttons (stubs you can expand) ---------- */
-function extractText(){ alert('OCR extraction placeholder – integrate Tesseract.js here.'); }
-function exportCSV(){  alert('Export CSV clicked.'); }
-function exportPDF(){  alert('Export PDF clicked.'); }
+/* ---------- Placeholder Functions ---------- */
+function extractText(){
+  setStatus("🔎 OCR not wired yet — demo row inserted.");
+  const tbody = document.querySelector("#receiptTable tbody");
+  tbody.innerHTML = `
+    <tr>
+      <td>Demo Store</td><td>GB123456</td><td>2025-09-03</td>
+      <td>Office Supplies</td><td>100</td><td>20</td><td>120</td>
+      <td>Card</td><td>✔</td><td>OK</td>
+    </tr>`;
+  document.getElementById("totalNet").textContent = "100";
+  document.getElementById("totalVAT").textContent = "20";
+  document.getElementById("totalGross").textContent = "120";
+  updateCharts();
+}
 
+function exportCSV(){ setStatus("CSV export not implemented yet."); }
+function exportPDF(){ setStatus("PDF export not implemented yet."); }
 function clearDemo(){
-  document.querySelector('#receiptTable tbody').innerHTML = '';
-  document.getElementById('netTotal').textContent   = '0';
-  document.getElementById('vatTotal').textContent   = '0';
-  document.getElementById('grossTotal').textContent = '0';
+  document.querySelector("#receiptTable tbody").innerHTML =
+    `<tr><td colspan="10" style="text-align:center;">No data yet</td></tr>`;
+  document.getElementById("totalNet").textContent = "0";
+  document.getElementById("totalVAT").textContent = "0";
+  document.getElementById("totalGross").textContent = "0";
+  pieChart.data.datasets[0].data = [];
+  barChart.data.datasets[0].data = [];
+  pieChart.update();
+  barChart.update();
+  setStatus("Demo data cleared.");
 }
 
 /* ---------- Charts ---------- */
-window.onload = function () {
-  const pieCtx = document.getElementById('pieChart').getContext('2d');
-  const barCtx = document.getElementById('barChart').getContext('2d');
+const pieCtx = document.getElementById("pieChart").getContext("2d");
+const barCtx = document.getElementById("barChart").getContext("2d");
 
-  new Chart(pieCtx, {
-    type: 'pie',
-    data: {
-      labels: ['Supplies', 'Travel', 'Meals'],
-      datasets: [{ data: [120, 80, 50], backgroundColor: ['#daa520', '#888', '#444'] }]
-    }
-  });
+const pieChart = new Chart(pieCtx, {
+  type: "pie",
+  data: {
+    labels: ["Supplies", "Travel", "Meals"],
+    datasets: [{ data: [], backgroundColor: ["#DAA520", "#888", "#555"] }]
+  }
+});
 
-  new Chart(barCtx, {
-    type: 'bar',
-    data: {
-      labels: ['
+const barChart = new Chart(barCtx, {
+  type: "bar",
+  data: {
+    labels: ["Jan", "Feb", "Mar"],
+    datasets: [{ label: "Spend (£)", data: [], backgroundColor: "#DAA520" }]
+  },
+  options: { scales: { y: { beginAtZero: true } } }
+});
+
+function updateCharts(){
+  pieChart.data.datasets[0].data = [100, 80, 60];
+  barChart.data.datasets[0].data = [200, 150, 300];
+  pieChart.update();
+  barChart.update();
+}
