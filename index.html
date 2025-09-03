@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <title>HMRC Receipt Extractor</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="style.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
@@ -10,8 +11,14 @@
   <h1>HMRC Receipt Extractor</h1>
 
   <div class="upload-box">
-    <input id="fileInput" type="file" accept="image/*" capture="environment" style="display:none" />
-    <button onclick="document.getElementById('fileInput').click()">📸 Upload / Take Photo</button>
+    <!-- Take Photo (opens Camera on iPhone) -->
+    <input id="cameraInput" type="file" accept="image/*;capture=camera" capture="environment" style="display:none" />
+    <button onclick="document.getElementById('cameraInput').click()">📷 Take Photo</button>
+
+    <!-- Choose from Library (opens Photos/files) -->
+    <input id="libraryInput" type="file" accept="image/*" multiple style="display:none" />
+    <button onclick="document.getElementById('libraryInput').click()">🖼 Choose from Library</button>
+
     <button onclick="extractText()">Extract</button>
     <button onclick="exportCSV()">Export CSV</button>
     <button onclick="exportPDF()">Export PDF Report</button>
