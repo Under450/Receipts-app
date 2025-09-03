@@ -1,163 +1,51 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>HMRC Receipt Extractor – OCR</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/modern-normalize/modern-normalize.min.css">
-<style>
-  body{font-family:Arial,Helvetica,sans-serif;background:#121212;color:#DAA520;margin:0;padding:20px}
-  h1{text-align:center;margin:6px 0 14px}
-  .upload-box{border:2px dashed #DAA520;background:#1e1e1e;padding:16px;max-width:720px;margin:0 auto 16px;text-align:center}
-  button{background:#DAA520;color:#121212;border:0;padding:10px 14px;margin:6px;border-radius:6px;font-weight:700}
-  button:hover{background:#fff;color:#121212}
-  #status{color:#fff;font-weight:700;margin-top:8px}
-  #ocrOut{color:#bbb;white-space:pre-wrap;text-align:left;font-size:.9rem;max-height:160px;overflow:auto;border:1px solid #333;padding:8px;margin:10px auto 0;display:none;background:#0f0f0f}
-  #preview{display:none;margin:10px auto 0;max-width:320px;border:1px solid #333;background:#000}
-  table{width:100%;max-width:980px;margin:16px auto;border-collapse:collapse;color:#fff}
-  th,td{border:1px solid #444;padding:8px;text-align:center}
-  th{background:#DAA520;color:#121212}
-  tfoot{font-weight:700}
-</style>
-<!-- Chart.js for your charts (kept) -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<!-- Tesseract.js for OCR -->
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
+  <meta charset="UTF-8">
+  <title>HMRC Receipt Extractor</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2/dist/tesseract.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
   <h1>HMRC Receipt Extractor</h1>
 
   <div class="upload-box">
-    <input id="cameraInput" type="file" accept="image/*;capture=camera" capture="environment" style="display:none">
-    <button onclick="document.getElementById('cameraInput').click()">📷 Take Photo</button>
-
-    <input id="libraryInput" type="file" accept="image/*" multiple style="display:none">
-    <button onclick="document.getElementById('libraryInput').click()">🖼 Choose from Library</button>
-
-    <button id="btnExtract">Extract</button>
-    <button id="btnCSV">Export CSV</button>
-    <button id="btnPDF">Export PDF</button>
-    <button id="btnClear">Clear</button>
-
-    <div id="status">Ready</div>
-    <img id="preview" alt="preview">
-    <div id="ocrOut"></div>
+    <input type="file" id="fileInput" accept="image/*" capture="environment">
+    <button onclick="processImage()">Extract</button>
+    <button onclick="exportCSV()">Export CSV</button>
+    <button onclick="exportPDF()">Export PDF</button>
+    <button onclick="clearTable()">Clear</button>
   </div>
 
   <table id="receiptTable">
     <thead>
       <tr>
-        <th>Supplier</th><th>VAT No</th><th>Date</th><th>Description</th>
-        <th>Net</th><th>VAT</th><th>Gross</th><th>Method</th><th>Checks</th><th>Audit</th>
+        <th>Supplier</th>
+        <th>VAT No</th>
+        <th>Date</th>
+        <th>Description</th>
+        <th>Net</th>
+        <th>VAT</th>
+        <th>Gross</th>
       </tr>
     </thead>
-    <tbody><tr><td colspan="10" style="text-align:center;">No data yet</td></tr></tbody>
+    <tbody></tbody>
     <tfoot>
       <tr>
         <td colspan="4">Totals</td>
-        <td id="totalNet">0</td><td id="totalVAT">0</td><td id="totalGross">0</td>
-        <td colspan="3"></td>
+        <td id="netTotal">0</td>
+        <td id="vatTotal">0</td>
+        <td id="grossTotal">0</td>
       </tr>
     </tfoot>
   </table>
 
-  <script>
-    const $ = s => document.querySelector(s);
-    const statusEl = $('#status'), previewEl = $('#preview'), ocrOut = $('#ocrOut');
+  <div class="charts">
+    <canvas id="pieChart"></canvas>
+    <canvas id="barChart"></canvas>
+  </div>
 
-    function setStatus(m){ statusEl.textContent=m; }
-
-    function handleFiles(list){
-      if(!list || !list.length){ setStatus('No file selected'); return; }
-      const f=list[0];
-      setStatus('Loading image…');
-      const r=new FileReader();
-      r.onload=()=>{ previewEl.src=r.result; previewEl.style.display='block'; setStatus('Image loaded. Tap Extract.'); };
-      r.onerror=()=>setStatus('Could not read file');
-      r.readAsDataURL(f);
-    }
-    $('#cameraInput').addEventListener('change',e=>handleFiles(e.target.files));
-    $('#libraryInput').addEventListener('change',e=>handleFiles(e.target.files));
-
-    // --- Minimal receipt parser (regex-based; works for many UK receipts) ---
-    function parseReceipt(text){
-      const lines=text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
-
-      // Supplier: first non-empty line that isn't obvious noise
-      const supplier = (lines[0]||'').slice(0,40);
-
-      // Date (various formats)
-      const mDate = text.match(/\b(\d{2}[\/\-]\d{2}[\/\-]\d{2,4}|\d{4}[\/\-]\d{2}[\/\-]\d{2})\b/);
-      const date = mDate ? mDate[1].replace(/\./g,'-') : '';
-
-      // VAT number (GB… or numeric)
-      const mVat = text.match(/\b(GB\s?\d{9}|\b\d{9}\b)\b/i);
-      const vatNo = mVat ? mVat[1].replace(/\s+/g,'') : '';
-
-      // Totals (prefer lines containing 'Total' or 'Gross')
-      let gross='', vat='', net='';
-      const totalLine = lines.find(l=>/total/i.test(l)) || '';
-      const money = s => (s.match(/(\d+\.\d{2})/g)||[]).map(Number);
-      const candidates = money(totalLine);
-      if(candidates.length){
-        gross = candidates[candidates.length-1].toFixed(2);
-      }
-      // explicit VAT/net if present
-      const mVatVal = text.match(/VAT[^0-9]*(\d+\.\d{2})/i);
-      if(mVatVal) vat = Number(mVatVal[1]).toFixed(2);
-      const mNetVal = text.match(/\b(Net|Subtotal)[^0-9]*(\d+\.\d{2})/i);
-      if(mNetVal) net = Number(mNetVal[2]).toFixed(2);
-
-      // derive missing pieces
-      if(gross && vat && !net) net = (Number(gross)-Number(vat)).toFixed(2);
-      if(gross && net && !vat) vat = (Number(gross)-Number(net)).toFixed(2);
-
-      // crude description
-      const desc = (lines.find(l=>/order|details|description|goods/i.test(l))||'').slice(0,40);
-
-      return {supplier, date, vatNo, net:net||'0.00', vat:vat||'0.00', gross:gross||net||'0.00', desc:desc||'Receipt'};
-    }
-
-    async function doOCR(){
-      if(!previewEl.src){ setStatus('Pick a photo first.'); return; }
-      setStatus('Running OCR… (first run ~5–10s)');
-      ocrOut.style.display='block'; ocrOut.textContent='…';
-      try{
-        const { data:{ text } } = await Tesseract.recognize(previewEl.src, 'eng', {
-          tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .:/-£',
-        });
-        ocrOut.textContent = text.trim() || '(no text read)';
-        setStatus('OCR complete. Parsing…');
-        const rec = parseReceipt(text);
-        // insert row
-        const tbody = document.querySelector('#receiptTable tbody');
-        tbody.innerHTML = `
-          <tr>
-            <td>${rec.supplier}</td><td>${rec.vatNo}</td><td>${rec.date}</td>
-            <td>${rec.desc}</td><td>${rec.net}</td><td>${rec.vat}</td><td>${rec.gross}</td>
-            <td>Card</td><td>${Number(rec.net)+Number(rec.vat)===Number(rec.gross)?'✅':'⚠️'}</td><td>OCR</td>
-          </tr>`;
-        $('#totalNet').textContent = rec.net;
-        $('#totalVAT').textContent = rec.vat;
-        $('#totalGross').textContent = rec.gross;
-        setStatus('Parsed and added to table.');
-      }catch(err){
-        console.error(err);
-        setStatus('OCR failed. Try a clearer photo.');
-        ocrOut.textContent='(OCR error)';
-      }
-    }
-
-    // Buttons
-    $('#btnExtract').addEventListener('click', doOCR);
-    $('#btnCSV').addEventListener('click', ()=>alert('CSV export to be wired next.'));
-    $('#btnPDF').addEventListener('click', ()=>alert('PDF export to be wired next.'));
-    $('#btnClear').addEventListener('click', ()=>{
-      document.querySelector('#receiptTable tbody').innerHTML =
-        '<tr><td colspan="10" style="text-align:center;">No data yet</td></tr>';
-      $('#totalNet').textContent='0'; $('#totalVAT').textContent='0'; $('#totalGross').textContent='0';
-      setStatus('Cleared.');
-    });
-  </script>
+  <script src="app.js"></script>
 </body>
 </html>
