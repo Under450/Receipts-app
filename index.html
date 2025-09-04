@@ -1,417 +1,206 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>HMRC Receipt Extractor – Click-Safe Fix</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>HMRC Receipt Extractor</title>
 
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/modern-normalize/modern-normalize.min.css">
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <!-- Onyx + Gold minimal styles (keep if you already have style.css) -->
+  <link rel="stylesheet" href="style.css" />
 
-<style>
-  :root{--onyx:#121212;--panel:#1e1e1e;--gold:#DAA520;--line:#333;--text:#fff}
-  body{background:var(--onyx);color:var(--gold);font-family:Arial,Helvetica,sans-serif;margin:0;padding:20px}
-  h1{text-align:center;margin:8px 0 14px}
-  .wrap{max-width:1100px;margin:0 auto}
-  .box{border:2px dashed var(--gold);background:var(--panel);padding:16px;border-radius:8px}
-  .btn{background:var(--gold);color:var(--onyx);border:0;padding:10px 14px;margin:6px;border-radius:6px;font-weight:700;cursor:pointer}
-  .btn:hover{background:#fff}
-  .btn-secondary{background:#444;color:#fff}
-  #status{color:#fff;font-weight:700;margin-top:8px;min-height:1.4em}
-  #preview{display:none;margin:10px auto 0;max-width:360px;border:1px solid var(--line);background:#000}
-  #ocrOut{display:none;color:#bbb;white-space:pre-wrap;font-size:.9rem;line-height:1.25;border:1px solid #333;background:#0f0f0f;padding:8px;margin-top:10px;max-height:180px;overflow:auto}
-  table{width:100%;border-collapse:collapse;color:#fff;margin-top:16px}
-  th,td{border:1px solid #444;padding:8px;text-align:center}
-  th{background:var(--gold);color:var(--onyx)}
-  tfoot{font-weight:700}
-  td.left{text-align:left}
-  .thumb{width:42px;height:42px;object-fit:cover;border:1px solid #444;cursor:pointer}
-  .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:12px 0}
-  .toolbar select,.toolbar input{background:#0f0f0f;border:1px solid #555;color:#fff;padding:8px;border-radius:6px}
-  .modal-back{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:9999;padding:10px}
-  .modal{width:min(760px,94vw);max-height:min(88vh,900px);overflow:auto;background:#161616;border:1px solid #333;border-radius:12px;padding:16px;color:#eee;-webkit-overflow-scrolling:touch}
-  .modal h2{margin:0 0 10px}
-  .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-  .grid label{display:block;font-size:.9rem;color:#ccc;margin-bottom:4px}
-  .grid input,.grid textarea,.grid select{width:100%;padding:10px;border-radius:6px;border:1px solid #555;background:#0f0f0f;color:#fff}
-  .grid textarea{min-height:74px;resize:vertical}
-  .row{display:flex;gap:10px;justify-content:flex-end;margin-top:12px}
-  .tip{font-size:.85rem;color:#aaa;margin-bottom:8px}
-  .ok{color:#7CFC00;font-weight:700}
-  .warn{color:#ffb347;font-weight:700}
-  .flex{display:flex;gap:14px;align-items:flex-start;margin:10px 0}
-  .shot{width:160px;border:1px solid #333;background:#000}
-  @media (max-width:700px){ .grid{grid-template-columns:1fr} .shot{width:44vw;max-width:220px} }
-</style>
+  <style>
+    /* Minimal fallback styles in case style.css isn't present */
+    body{margin:0;background:#111;color:#eee;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    .wrap{max-width:980px;margin:24px auto;padding:0 16px}
+    h1{color:#DAA520;margin:16px 0 8px}
+    .panel{border:2px dashed #DAA520;border-radius:8px;padding:14px;margin:12px 0;background:#171717}
+    .btn{background:#DAA520;color:#111;border:none;border-radius:8px;padding:10px 14px;font-weight:700}
+    .btn:active{transform:scale(.98)}
+    .btn-row{display:flex;flex-wrap:wrap;gap:10px}
+    table{width:100%;border-collapse:collapse;margin:14px 0;background:#151515}
+    th,td{border:1px solid #333;padding:8px;font-size:14px}
+    th{background:#DAA520;color:#111;text-align:left}
+    tfoot td{font-weight:700}
+    /* Modal */
+    .modal{position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;z-index:50}
+    .modal.open{display:block}
+    .modal__inner{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:min(880px,92vw);max-height:86vh;overflow:auto;background:#161616;border-radius:14px;box-shadow:0 10px 40px rgba(0,0,0,.6);padding:16px}
+    .modal header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px}
+    .modal h2{margin:0;color:#DAA520}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .thumb{width:100%;aspect-ratio:4/5;object-fit:cover;border-radius:8px;background:#111;border:1px solid #333}
+    label{font-weight:600;font-size:14px}
+    input,select,textarea{width:100%;background:#0f0f0f;color:#eee;border:1px solid #333;border-radius:10px;padding:10px 12px}
+    textarea{min-height:84px;resize:vertical}
+    .modal .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .right{display:flex;justify-content:flex-end;gap:10px;margin-top:12px}
+    .warn{color:#ffc04d;font-weight:800}
+    .badge{background:#222;border:1px solid #333;border-radius:6px;padding:2px 8px;font-size:12px}
+  </style>
 </head>
 <body>
-<div class="wrap">
-  <h1>HMRC Receipt Extractor</h1>
+  <div class="wrap">
+    <h1>HMRC Receipt Extractor</h1>
 
-  <div class="box">
-    <input id="cameraInput" type="file" accept="image/*;capture=camera" capture="environment" style="display:none">
-    <button class="btn" onclick="document.getElementById('cameraInput').click()">📷 Take Photo</button>
+    <!-- Controls -->
+    <div class="panel">
+      <div class="btn-row">
+        <button id="btnCamera" class="btn">📷 Take Photo</button>
+        <input id="fileInput" type="file" accept="image/*" capture="environment" style="display:none" />
+        <button id="btnLibrary" class="btn">🖼️ Choose from Library</button>
+        <input id="libraryInput" type="file" accept="image/*" style="display:none" />
 
-    <input id="libraryInput" type="file" accept="image/*" style="display:none">
-    <button class="btn" onclick="document.getElementById('libraryInput').click()">🖼 Choose from Library</button>
-
-    <button class="btn" id="btnExtract" onclick="onExtractClick()">Extract</button>
-    <button class="btn btn-secondary" id="btnManual" onclick="onManualClick()">✏️ Manual Fix</button>
-    <button class="btn btn-secondary" id="btnCSV" onclick="exportCSV()">Export CSV</button>
-    <button class="btn btn-secondary" id="btnXLSX" onclick="exportXLSX()">Export Excel</button>
-    <button class="btn btn-secondary" id="btnClear" onclick="onClear()">Clear</button>
-
-    <div id="status">Ready</div>
-    <img id="preview" alt="preview">
-    <div id="ocrOut"></div>
-  </div>
-
-  <div class="toolbar">
-    <label>Filter by Category:</label>
-    <select id="filterCategory">
-      <option value="">All</option>
-      <option>Travel</option><option>Subsistence/Meals</option><option>Office Supplies</option>
-      <option>Phone & Internet</option><option>Postage & Delivery</option><option>Professional Fees</option>
-      <option>Advertising & Marketing</option><option>Training</option><option>Repairs & Maintenance</option>
-      <option>Tools & Equipment</option><option>Rent & Utilities</option><option>Insurance</option>
-      <option>Bank Charges</option><option>Other Allowable</option>
-    </select>
-
-    <label>Search:</label>
-    <input id="searchText" placeholder="Supplier, Notes, Description…" />
-    <button class="btn btn-secondary" onclick="applyFilter()">Apply</button>
-    <button class="btn btn-secondary" onclick="resetFilter()">Reset</button>
-  </div>
-
-  <table id="receiptTable">
-    <thead>
-      <tr>
-        <th>Img</th><th>Supplier</th><th>VAT No</th><th>Date</th><th>Purpose / Notes</th>
-        <th>Category</th><th>Description</th><th>Net</th><th>VAT</th><th>Gross</th><th>Method</th><th>Checks</th><th>Audit</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr><td colspan="13" class="left">No data yet</td></tr>
-    </tbody>
-    <tfoot>
-      <tr>
-        <td colspan="7">Totals</td>
-        <td id="totalNet">0.00</td>
-        <td id="totalVAT">0.00</td>
-        <td id="totalGross">0.00</td>
-        <td colspan="3"></td>
-      </tr>
-    </tfoot>
-  </table>
-</div>
-
-<!-- Manual Fix Modal -->
-<div id="modalBack" class="modal-back" role="dialog" aria-modal="true" aria-labelledby="mfTitle">
-  <div class="modal">
-    <h2 id="mfTitle">Manual Fix</h2>
-    <div class="tip">
-      Edit fields. If one of <em>Net/VAT/Gross</em> is blank, it auto-recalculates.
-      <span id="calcHint" class="ok" style="display:none">✅ Totals OK</span>
-      <span id="calcWarn" class="warn" style="display:none">⚠️ Totals don’t match</span>
-    </div>
-
-    <input type="hidden" id="mfId">
-
-    <div class="flex">
-      <img id="mfShot" class="shot" alt="receipt">
-      <div class="grid" style="flex:1">
-        <div><label>Supplier</label><input id="mfSupplier"></div>
-        <div><label>VAT No</label><input id="mfVatNo"></div>
-        <div><label>Date</label><input id="mfDate" type="date"></div>
-        <div><label>Description</label><input id="mfDesc" value="Receipt"></div>
-        <div><label>Purpose / Notes</label><textarea id="mfPurpose" placeholder="e.g., Parts for job 570"></textarea></div>
-        <div><label>Category</label>
-          <select id="mfCategory">
-            <option value="">— Choose —</option>
-            <option>Travel</option><option>Subsistence/Meals</option><option>Office Supplies</option>
-            <option>Phone & Internet</option><option>Postage & Delivery</option><option>Professional Fees</option>
-            <option>Advertising & Marketing</option><option>Training</option><option>Repairs & Maintenance</option>
-            <option>Tools & Equipment</option><option>Rent & Utilities</option><option>Insurance</option>
-            <option>Bank Charges</option><option>Other Allowable</option>
-          </select>
-        </div>
-        <div><label>Net (£)</label><input id="mfNet" inputmode="decimal" placeholder="0.00" oninput="updateCheckHint()"></div>
-        <div><label>VAT (£)</label><input id="mfVAT" inputmode="decimal" placeholder="0.00" oninput="updateCheckHint()"></div>
-        <div><label>Gross (£)</label><input id="mfGross" inputmode="decimal" placeholder="0.00" oninput="updateCheckHint()"></div>
-        <div><label>Method</label><input id="mfMethod" value="Card"></div>
+        <button id="btnExtract" class="btn">Extract</button>
+        <button id="btnExportCsv" class="btn">Export CSV</button>
+        <button id="btnExportPdf" class="btn">Export PDF</button>
+        <button id="btnClear" class="btn" style="background:#444;color:#eee;">Clear</button>
+        <span class="badge" id="statusBadge">Ready</span>
+      </div>
+      <div id="previewArea" style="margin-top:12px;display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap">
+        <img id="previewImg" class="thumb" alt="Preview" />
+        <pre id="ocrText" style="margin:0;white-space:pre-wrap;flex:1;min-height:120px;background:#111;border:1px solid #333;border-radius:8px;padding:10px"></pre>
       </div>
     </div>
 
-    <div class="row">
-      <button class="btn btn-secondary" onclick="closeManualFix()">Cancel</button>
-      <button class="btn" id="mfSave" onclick="onSaveClick()">Save</button>
+    <!-- Ledger -->
+    <table id="receiptTable">
+      <thead>
+        <tr>
+          <th>Supplier</th>
+          <th>VAT No</th>
+          <th>Date</th>
+          <th>Description / Notes</th>
+          <th>Net</th>
+          <th>VAT</th>
+          <th>Gross</th>
+          <th>Method</th>
+          <th>Category</th>
+          <th>Audit</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+      <tfoot>
+        <tr>
+          <td colspan="4" style="text-align:right">Totals</td>
+          <td id="totalNet">£0.00</td>
+          <td id="totalVat">£0.00</td>
+          <td id="totalGross">£0.00</td>
+          <td colspan="3"></td>
+        </tr>
+      </tfoot>
+    </table>
+
+    <!-- Manual Fix button (appears after OCR or for manual add) -->
+    <div class="right">
+      <button id="btnManualFix" class="btn">Manual Fix</button>
     </div>
   </div>
-</div>
 
-<script>
-  /* ===== Global error trap ===== */
-  window.onerror = function(msg, src, line, col, err){
-    const s = document.getElementById('status');
-    if(s) s.textContent = '⚠️ JS error: ' + (err?.message || msg);
-    return false;
-  };
+  <!-- Manual Fix Modal -->
+  <div id="manualFixModal" class="modal" role="dialog" aria-modal="true">
+    <div class="modal__inner">
+      <header>
+        <h2>Manual Fix</h2>
+        <span class="warn">⚠ Totals don’t match (auto-calc will help)</span>
+      </header>
 
-  /* ===== Helpers ===== */
-  const $=s=>document.querySelector(s);
-  const statusEl=$('#status'), previewEl=$('#preview'), ocrOut=$('#ocrOut');
-  const money=n=>(+n||0).toFixed(2);
-  const toNum=v=>{ const n=parseFloat(String(v||'').replace(/[^0-9.]/g,'')); return isFinite(n)?n:0; };
-  const totalsOK=(n,v,g)=> +((+n)+(+v)).toFixed(2)===+(+g).toFixed(2);
-  const setStatus=m=>statusEl.textContent=m;
+      <div class="grid" style="margin-bottom:10px">
+        <img id="manualThumb" class="thumb" alt="Receipt preview" />
+        <div class="row">
+          <div>
+            <label for="manualSupplier">Supplier</label>
+            <input id="manualSupplier" placeholder="Supplier name" />
+          </div>
+          <div>
+            <label for="manualVatNo">VAT No</label>
+            <input id="manualVatNo" placeholder="GB123456789" />
+          </div>
+          <div>
+            <label for="manualDate">Date</label>
+            <input id="manualDate" type="date" />
+          </div>
+          <div>
+            <label for="manualMethod">Method</label>
+            <select id="manualMethod">
+              <option>Card</option>
+              <option>Cash</option>
+              <option>Bank Transfer</option>
+              <option>Other</option>
+            </select>
+          </div>
+          <div style="grid-column:1/-1">
+            <label for="manualDescription">Description</label>
+            <input id="manualDescription" placeholder="e.g., Order Details" />
+          </div>
+          <div style="grid-column:1/-1">
+            <label for="manualNotes">Purpose / Notes</label>
+            <textarea id="manualNotes" placeholder="e.g., Parts for job 570"></textarea>
+          </div>
+          <div>
+            <label for="manualCategory">Category</label>
+            <select id="manualCategory">
+              <option value="">— Choose —</option>
+              <option>Office Supplies</option>
+              <option>Travel</option>
+              <option>Meals</option>
+              <option>Tools & Equipment</option>
+              <option>Vehicle (fuel/maintenance)</option>
+              <option>Phone & Internet</option>
+              <option>Premises (rent/rates)</option>
+              <option>Insurance</option>
+              <option>Professional Fees</option>
+              <option>Other</option>
+            </select>
+          </div>
+          <div>
+            <label for="manualGross">Gross (£)</label>
+            <input id="manualGross" inputmode="decimal" value="0.00" />
+          </div>
+          <div>
+            <label for="manualNet">Net (£)</label>
+            <input id="manualNet" inputmode="decimal" value="0.00" />
+          </div>
+          <div>
+            <label for="manualVat">VAT (£)</label>
+            <input id="manualVat" inputmode="decimal" value="0.00" />
+          </div>
+        </div>
+      </div>
 
-  /* ===== Storage (stable key) ===== */
-  const KEY='mpj_receipts_prod';
-  let receipts=[];
-  let storageOK=true;
-  try{ localStorage.setItem('__rt','1'); localStorage.removeItem('__rt'); }catch{ storageOK=false; }
-  const saveStore=()=>{ if(!storageOK) return; localStorage.setItem(KEY, JSON.stringify(receipts)); };
-  const loadStore=()=>{ try{ receipts=JSON.parse(localStorage.getItem(KEY)||'[]'); }catch{ receipts=[]; } renderTable(); };
+      <div class="right">
+        <button id="cancelManualFix" class="btn" style="background:#333;color:#eee">Cancel</button>
+        <button id="saveManualFix" class="btn">Save</button>
+      </div>
+    </div>
+  </div>
 
-  /* ===== State ===== */
-  let lastImageDataURL=null;
-  let activeFilterCat='', activeSearch='';
+  <!-- App logic -->
+  <script src="app.js"></script>
 
-  /* ===== File selection ===== */
-  function handleFiles(list){
-    if(!list?.length){ setStatus('No file selected'); return; }
-    const r=new FileReader();
-    r.onload=()=>{ lastImageDataURL=r.result; previewEl.src=r.result; previewEl.style.display='block'; setStatus('Image loaded. Tap Extract or Manual Fix.'); };
-    r.readAsDataURL(list[0]);
-  }
-  document.getElementById('cameraInput').addEventListener('change',e=>handleFiles(e.target.files));
-  document.getElementById('libraryInput').addEventListener('change',e=>handleFiles(e.target.files));
+  <script>
+    // Hook up camera/library buttons to the hidden inputs
+    const fileInput = document.getElementById('fileInput');
+    const libInput  = document.getElementById('libraryInput');
 
-  /* ===== Preprocess for OCR ===== */
-  async function preprocessToDataURL(dataURL){
-    const img=new Image(); img.src=dataURL; await img.decode?.();
-    const pad=20, w=img.naturalWidth-pad*2, h=img.naturalHeight-pad*2;
-    const scale=Math.min(1.8, 1400/Math.min(w,h));
-    const cw=Math.max(1,Math.round(w*scale)), ch=Math.max(1,Math.round(h*scale));
-    const c=document.createElement('canvas'); c.width=cw; c.height=ch;
-    const ctx=c.getContext('2d',{willReadFrequently:true});
-    ctx.drawImage(img,pad,pad,w,h,0,0,cw,ch);
-    let im=ctx.getImageData(0,0,cw,ch), d=im.data;
-    for(let i=0;i<d.length;i+=4){ const g=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2]; const gc=Math.max(0,Math.min(255,(g-128)*1.25+128)); d[i]=d[i+1]=d[i+2]=gc; }
-    ctx.putImageData(im,0,0);
-    im=ctx.getImageData(0,0,cw,ch); d=im.data; let sum=0; for(let i=0;i<d.length;i+=4) sum+=d[i];
-    const T=(sum/(d.length/4))*0.9;
-    for(let i=0;i<d.length;i+=4){ const v=d[i]<T?0:255; d[i]=d[i+1]=d[i+2]=v; }
-    ctx.putImageData(im,0,0);
-    return c.toDataURL('image/png');
-  }
+    document.getElementById('btnCamera').addEventListener('click', ()=>fileInput.click());
+    document.getElementById('btnLibrary').addEventListener('click', ()=>libInput.click());
 
-  /* ===== Parse OCR text ===== */
-  function parseReceipt(text){
-    const lines=text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
-    const supplier=(lines[0]||'').replace(/[^A-Za-z0-9 &\-']/g,'').slice(0,48);
-    const mDate=text.match(/\b(\d{2}[\/\-]\d{2}[\/\-]\d{2,4}|\d{4}[\/\-]\d{2}[\/\-]\d{2})\b/);
-    let date=mDate?mDate[1].replace(/\./g,'-'):'';
-    if(/^\d{2}\/\d{2}\/\d{4}$/.test(date)){ const [d,m,y]=date.split('/'); date=`${y}-${m}-${d}`; }
-    const mVatNo=text.match(/\b(GB\s?\d{9}|\d{9})\b/i); const vatNo=mVatNo?mVatNo[1].replace(/\s+/g,''):'';
-    const totalLine=lines.find(l=>/total/i.test(l))||'';
-    const moneyList=s=>(s.match(/\d+\.\d{2}/g)||[]).map(Number);
-    let gross=moneyList(totalLine).slice(-1)[0];
-    let vat=(text.match(/VAT[^0-9]*(\d+\.\d{2})/i)||[])[1]; if(vat) vat=Number(vat);
-    let net=(text.match(/\b(Net|Subtotal)[^0-9]*(\d+\.\d{2})/i)||[])[2]; if(net) net=Number(net);
-    if(gross && vat!=null && net==null) net=+(gross-vat).toFixed(2);
-    if(gross && net!=null && vat==null) vat=+(gross-net).toFixed(2);
-    if(!gross && net!=null && vat!=null) gross=+(net+vat).toFixed(2);
-    const desc=(lines.find(l=>/order|details|description|goods/i.test(l))||'Receipt').slice(0,80);
-    return {supplier,vatNo,date,desc,net:net??0,vat:vat??0,gross:gross??(net??0)+(vat??0)};
-  }
-
-  /* ===== OCR with explicit paths ===== */
-  function withTimeout(p,ms){ return Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),ms))]); }
-  async function onExtractClick(){
-    if(!lastImageDataURL){ setStatus('Pick a photo first.'); return; }
-    if(!window.Tesseract){ setStatus('OCR library not loaded yet — try again.'); return; }
-
-    ocrOut.style.display='block'; ocrOut.textContent='…'; setStatus('Preprocessing…');
-    try{
-      const cleanURL=await preprocessToDataURL(lastImageDataURL);
-      setStatus('Reading text… (first run ~10s)');
-      const opts={
-        tessedit_pageseg_mode:'6',
-        tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,:;/\\-£',
-        workerPath:'https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/worker.min.js',
-        corePath:'https://cdn.jsdelivr.net/npm/tesseract.js-core@4.0.2/tesseract-core.wasm.js',
-        langPath:'https://cdn.jsdelivr.net/npm/tesseract.js-core@4.0.2/lang-data'
-      };
-      const res=await withTimeout(Tesseract.recognize(cleanURL,'eng',opts),20000);
-      const out=(res?.data?.text||'').replace(/\n{3,}/g,'\n\n').trim();
-      ocrOut.textContent=out||'(no text read)';
-      const parsed=parseReceipt(out);
-
-      const hasNumbers = (parsed.gross||0)>0 && ((parsed.net||0)>0 || (parsed.vat||0)>0);
-      if(hasNumbers){
-        const rec={
-          id: Date.now(),
-          supplier: parsed.supplier||'—',
-          vatNo: parsed.vatNo||'',
-          date: parsed.date||'',
-          purpose: '',
-          category: '',
-          desc: parsed.desc||'Receipt',
-          net:+money(parsed.net), vat:+money(parsed.vat), gross:+money(parsed.gross),
-          method:'Card', image:lastImageDataURL||'', ocr:out
-        };
-        upsertReceipt(rec);
-        setStatus('Extracted and saved.');
-      }else{
-        openManualFix({ ...parsed, method:'Card', purpose:'', category:'', image:lastImageDataURL||'', ocr:out });
-        setStatus('OCR done. Review in Manual Fix.');
-      }
-    }catch(e){
-      ocrOut.textContent='(OCR failed/timeout — enter manually)';
-      openManualFix({supplier:'',vatNo:'',date:'',desc:'Receipt',net:0,vat:0,gross:0,method:'Card',purpose:'',category:'',image:lastImageDataURL||'',ocr:''});
-      setStatus('OCR failed/timeout. Enter manually.');
+    // Preview selected image (either source)
+    function handleImage(file){
+      if(!file) return;
+      const url = URL.createObjectURL(file);
+      document.getElementById('previewImg').src = url;
+      document.getElementById('statusBadge').textContent = 'Image loaded';
+      // If you run OCR in app.js, you can also set manualThumb there.
+      document.getElementById('manualThumb').src = url;
     }
-  }
+    fileInput.addEventListener('change', e => handleImage(e.target.files[0]));
+    libInput.addEventListener('change',  e => handleImage(e.target.files[0]));
 
-  /* ===== Manual Fix ===== */
-  const back=$('#modalBack');
-  function onManualClick(){
-    openManualFix({id:'', supplier:'', vatNo:'', date:'', purpose:'', category:'', desc:'Receipt', net:0, vat:0, gross:0, method:'Card', image:lastImageDataURL||'', ocr:ocrOut.textContent||''});
-  }
-  function openManualFix(data){
-    $('#mfId').value = data.id || '';
-    $('#mfSupplier').value=data.supplier||'';
-    $('#mfVatNo').value=data.vatNo||'';
-    $('#mfDate').value=data.date||'';
-    $('#mfDesc').value=data.desc||'Receipt';
-    $('#mfPurpose').value=data.purpose||'';
-    $('#mfCategory').value=data.category||'';
-    $('#mfNet').value=money(data.net);
-    $('#mfVAT').value=money(data.vat);
-    $('#mfGross').value=money(data.gross);
-    $('#mfMethod').value=data.method||'Card';
-    $('#mfShot').src=data.image||'';
-    back.style.display='flex'; updateCheckHint();
-  }
-  function closeManualFix(){ back.style.display='none'; }
-
-  function updateCheckHint(){
-    let n=$('#mfNet').value, v=$('#mfVAT').value, g=$('#mfGross').value;
-    const nN=toNum(n), vN=toNum(v), gN=toNum(g);
-    if(n===''&&v!==''&&g!=='') $('#mfNet').value  = money(gN - vN);
-    if(v===''&&n!==''&&g!=='') $('#mfVAT').value  = money(gN - nN);
-    if(g===''&&n!==''&&v!=='') $('#mfGross').value= money(nN + vN);
-    const ok=totalsOK(toNum($('#mfNet').value),toNum($('#mfVAT').value),toNum($('#mfGross').value));
-    $('#calcHint').style.display=ok?'inline':'none';
-    $('#calcWarn').style.display=ok?'none':'inline';
-  }
-
-  function onSaveClick(){
-    const existingId=$('#mfId').value.trim();
-    let net=toNum($('#mfNet').value), vat=toNum($('#mfVAT').value), gross=toNum($('#mfGross').value);
-    if(!gross && (net||vat)) gross=+(net+vat).toFixed(2);
-    if(!net && gross && vat) net=+(gross-vat).toFixed(2);
-    if(!vat && gross && net) vat=+(gross-net).toFixed(2);
-
-    const rec={
-      id: existingId ? Number(existingId) : Date.now(),
-      supplier: $('#mfSupplier').value.trim()||'—',
-      vatNo: $('#mfVatNo').value.trim(),
-      date: $('#mfDate').value,
-      purpose: $('#mfPurpose').value.trim(),
-      category: $('#mfCategory').value || '',
-      desc: $('#mfDesc').value.trim()||'Receipt',
-      net:+money(net), vat:+money(vat), gross:+money(gross),
-      method: $('#mfMethod').value.trim()||'Card',
-      image: $('#mfShot').src || '',
-      ocr: (document.getElementById('ocrOut').textContent || '').trim()
-    };
-    upsertReceipt(rec);
-    closeManualFix();
-    setStatus(storageOK ? 'Saved.' : 'Saved (memory only)');
-  }
-
-  /* ===== Filters / Table / Totals ===== */
-  function applyFilter(){ activeFilterCat=$('#filterCategory').value; activeSearch=($('#searchText').value||'').toLowerCase(); renderTable(); }
-  function resetFilter(){ activeFilterCat=''; activeSearch=''; $('#filterCategory').value=''; $('#searchText').value=''; renderTable(); }
-
-  function upsertReceipt(rec){
-    const i=receipts.findIndex(r=>r.id===rec.id);
-    if(i>=0) receipts[i]=rec; else receipts.push(rec);
-    saveStore(); renderTable();
-  }
-
-  function renderTable(){
-    const tb=document.querySelector('#receiptTable tbody');
-    let list=[...receipts];
-    if(activeFilterCat) list=list.filter(r=>r.category===activeFilterCat);
-    if(activeSearch) list=list.filter(r=>(r.supplier||'').toLowerCase().includes(activeSearch)||(r.purpose||'').toLowerCase().includes(activeSearch)||(r.desc||'').toLowerCase().includes(activeSearch));
-
-    if(!list.length){
-      tb.innerHTML='<tr><td colspan="13" class="left">No data yet</td></tr>';
-      document.getElementById('totalNet').textContent='0.00';
-      document.getElementById('totalVAT').textContent='0.00';
-      document.getElementById('totalGross').textContent='0.00';
-      return;
-    }
-
-    tb.innerHTML=list.map(r=>`
-      <tr>
-        <td>${r.image?`<img class="thumb" src="${r.image}" alt="img" data-id="${r.id}">`:''}</td>
-        <td class="left">${r.supplier}</td>
-        <td>${r.vatNo||'—'}</td>
-        <td>${r.date||'—'}</td>
-        <td class="left">${r.purpose||'—'}</td>
-        <td class="left">${r.category||'—'}</td>
-        <td class="left">${r.desc}</td>
-        <td>${money(r.net)}</td>
-        <td>${money(r.vat)}</td>
-        <td>${money(r.gross)}</td>
-        <td>${r.method}</td>
-        <td>${totalsOK(r.net,r.vat,r.gross)?'✅':'⚠️'}</td>
-        <td>Saved</td>
-      </tr>`).join('');
-
-    const tn=list.reduce((a,b)=>a+(+b.net||0),0);
-    const tv=list.reduce((a,b)=>a+(+b.vat||0),0);
-    const tg=list.reduce((a,b)=>a+(+b.gross||0),0);
-    document.getElementById('totalNet').textContent=money(tn);
-    document.getElementById('totalVAT').textContent=money(tv);
-    document.getElementById('totalGross').textContent=money(tg);
-
-    // click thumb to edit
-    tb.querySelectorAll('.thumb').forEach(img=>{
-      img.addEventListener('click',()=>{ const rec=receipts.find(r=>r.id==img.dataset.id); if(rec) openManualFix({...rec}); });
-    });
-  }
-
-  /* ===== Export / Clear ===== */
-  function exportCSV(){
-    if(!receipts.length) return alert('No rows.');
-    const header=['Supplier','VAT No','Date','Purpose','Category','Description','Net','VAT','Gross','Method'];
-    const rows=receipts.map(r=>[r.supplier,r.vatNo,r.date,r.purpose,r.category||'',r.desc,money(r.net),money(r.vat),money(r.gross),r.method]);
-    const csv=[header,...rows].map(a=>a.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
-    const blob=new Blob([csv],{type:'text/csv;charset=utf-8'}), a=document.createElement('a');
-    a.href=URL.createObjectURL(blob); a.download='receipts.csv'; a.click(); URL.revokeObjectURL(a.href);
-  }
-  function exportXLSX(){
-    if(!receipts.length) return alert('No rows.');
-    const data=[['Supplier','VAT No','Date','Purpose','Category','Description','Net','VAT','Gross','Method']];
-    receipts.forEach(r=>data.push([r.supplier,r.vatNo,r.date,r.purpose,r.category||'',r.desc,+money(r.net),+money(r.vat),+money(r.gross),r.method]));
-    const ws=XLSX.utils.aoa_to_sheet(data); const wb=XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb,ws,'Receipts'); XLSX.writeFile(wb,'receipts.xlsx');
-  }
-  function onClear(){
-    if(confirm('Clear table and stored receipts?')){
-      receipts=[]; if(storageOK) localStorage.removeItem(KEY);
-      renderTable(); setStatus('Cleared.'); ocrOut.style.display='none'; ocrOut.textContent='';
-    }
-  }
-
-  /* ===== Init ===== */
-  loadStore();
-</script>
+    // Manual fix open/close
+    const modal = document.getElementById('manualFixModal');
+    document.getElementById('btnManualFix').addEventListener('click', ()=> modal.classList.add('open'));
+    document.getElementById('cancelManualFix').addEventListener('click', ()=> modal.classList.remove('open'));
+  </script>
 </body>
 </html>
