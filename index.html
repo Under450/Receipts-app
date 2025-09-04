@@ -4,36 +4,9 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>HMRC Receipt Extractor</title>
-
-<!-- Tesseract OCR -->
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-
-<style>
-  :root{--onyx:#121212;--gold:#DAA520;--ink:#f5f5f5;--panel:#1b1b1b}
-  html,body{margin:0;background:var(--onyx);color:var(--ink);font:16px/1.4 -apple-system,system-ui,Segoe UI,Roboto,Helvetica,Arial}
-  h1{margin:18px 0;text-align:center;color:var(--gold)}
-  .wrap{max-width:980px;margin:0 auto;padding:12px}
-  .box{border:2px dashed var(--gold);padding:14px;background:var(--panel);border-radius:10px}
-  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:center}
-  button{background:var(--gold);border:none;color:#000;padding:10px 14px;border-radius:8px;font-weight:600}
-  button.ghost{background:#333;color:#fff}
-  #status{display:inline-block;margin-left:8px;opacity:.85}
-  #previewImg{display:block;max-width:100%;max-height:380px;margin:12px auto;border-radius:6px}
-  #ocrText{white-space:pre-wrap;background:#0d0d0d;border:1px solid #333;border-radius:6px;padding:10px;min-height:80px}
-  table{width:100%;border-collapse:collapse;margin-top:18px;background:#101010}
-  th,td{border:1px solid #333;padding:10px}
-  th{background:var(--gold);color:#000}
-  tfoot td{font-weight:700}
-  /* Modal */
-  .modal{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:center;justify-content:center;padding:16px;z-index:100}
-  .card{background:#1b1b1b;border-radius:12px;max-width:780px;width:100%;max-height:92vh;overflow:auto;padding:16px;border:1px solid #333}
-  .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-  label{font-weight:600;margin-top:8px;display:block}
-  input,select,textarea{width:100%;background:#111;border:1px solid #444;border-radius:8px;padding:10px;color:#fff}
-  textarea{min-height:72px}
-  .right{display:flex;gap:10px;justify-content:flex-end;margin-top:12px}
-  @media (max-width:640px){.grid{grid-template-columns:1fr}}
-</style>
+<link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <div class="wrap">
@@ -42,21 +15,19 @@
     <!-- Controls -->
     <div class="box">
       <div class="row">
-        <!-- hidden inputs -->
-        <input id="inputCamera"  type="file" accept="image/*" capture="environment" hidden>
-        <input id="inputLibrary" type="file" accept="image/*" hidden>
-
+        <input id="camera" type="file" accept="image/*" capture="environment" hidden>
+        <input id="library" type="file" accept="image/*" hidden>
         <button id="btnCamera">📷 Take Photo</button>
         <button id="btnLibrary">🖼️ Choose from Library</button>
         <button id="btnExtract" class="ghost">Extract</button>
-        <button id="btnCSV"    class="ghost">Export CSV</button>
-        <button id="btnClear"  class="ghost">Clear</button>
+        <button id="btnCSV" class="ghost">Export CSV</button>
+        <button id="btnClear" class="ghost">Clear</button>
       </div>
-      <img id="previewImg" alt="">
-      <div id="ocrText" aria-label="OCR text will appear here"></div>
+      <img id="preview" alt="">
+      <div id="ocrText"></div>
     </div>
 
-    <!-- Ledger table -->
+    <!-- Table -->
     <table>
       <thead>
         <tr>
@@ -64,35 +35,33 @@
           <th>Net</th><th>VAT</th><th>Gross</th><th>Method</th><th>Audit</th>
         </tr>
       </thead>
-      <tbody id="receiptsBody"></tbody>
+      <tbody id="tbody"></tbody>
       <tfoot>
         <tr>
           <td colspan="4">Totals</td>
-          <td id="totalNet">0.00</td>
-          <td id="totalVat">0.00</td>
-          <td id="totalGross">0.00</td>
+          <td id="tNet">0.00</td><td id="tVat">0.00</td><td id="tGross">0.00</td>
           <td colspan="2"></td>
         </tr>
       </tfoot>
     </table>
   </div>
 
-  <!-- Manual Fix modal -->
-  <div class="modal" id="manualModal">
+  <!-- Manual modal -->
+  <div class="modal" id="modal">
     <div class="card">
-      <h2 style="margin:4px 0 10px">Manual Fix <small style="opacity:.8">Review & Save</small></h2>
+      <h2>Manual Fix <small class="muted">Review &amp; Save</small></h2>
       <div class="grid">
         <div>
           <img id="modalPreview" alt="" style="max-width:100%;border-radius:8px;border:1px solid #333"/>
         </div>
         <div>
-          <label>Supplier<input id="manualSupplier" autocomplete="off"></label>
-          <label>VAT No<input id="manualVatNo" autocomplete="off"></label>
-          <label>Date<input id="manualDate" type="date"></label>
-          <label>Description<input id="manualDesc" autocomplete="off" placeholder="e.g., Order Details"></label>
-          <label>Purpose / Notes<textarea id="manualNotes" placeholder="e.g., Parts for job 570"></textarea></label>
+          <label>Supplier<input id="mSupplier"></label>
+          <label>VAT No<input id="mVatNo"></label>
+          <label>Date<input id="mDate" type="date"></label>
+          <label>Description<input id="mDesc"></label>
+          <label>Purpose / Notes<textarea id="mNotes"></textarea></label>
           <label>Category
-            <select id="manualCat">
+            <select id="mCat">
               <option value="">— Choose —</option>
               <option>Office Supplies</option><option>Travel</option><option>Meals</option>
               <option>Phone & Internet</option><option>Tools</option><option>Subcontractors</option>
@@ -100,23 +69,22 @@
             </select>
           </label>
           <div class="grid">
-            <label>Net (£)<input id="manualNet" inputmode="decimal" placeholder="0.00"></label>
-            <label>VAT (£)<input id="manualVat" inputmode="decimal" placeholder="0.00"></label>
+            <label>Net (£)<input id="mNet" inputmode="decimal"></label>
+            <label>VAT (£)<input id="mVat" inputmode="decimal"></label>
           </div>
-          <label>Gross (£)<input id="manualGross" inputmode="decimal" placeholder="0.00"></label>
+          <label>Gross (£)<input id="mGross" inputmode="decimal"></label>
           <label>Method
-            <select id="manualMethod"><option>Card</option><option>Cash</option><option>Bank</option></select>
+            <select id="mMethod"><option>Card</option><option>Cash</option><option>Bank</option></select>
           </label>
         </div>
       </div>
       <div class="right">
-        <button id="manualCancel" class="ghost">Cancel</button>
-        <button id="manualSave">Save</button>
+        <button id="mCancel" class="ghost">Cancel</button>
+        <button id="mSave">Save</button>
       </div>
     </div>
   </div>
 
-  <!-- App logic -->
-  <script src="app.js"></script>
+<script src="app.js"></script>
 </body>
 </html>
