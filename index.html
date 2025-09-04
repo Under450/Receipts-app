@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>HMRC Receipt Extractor – Fixed Save + Net/VAT</title>
+<title>HMRC Receipt Extractor – Stable Save + OCR Fallback</title>
 
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/modern-normalize/modern-normalize.min.css">
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
@@ -18,7 +18,7 @@
   .btn{background:var(--gold);color:var(--onyx);border:0;padding:10px 14px;margin:6px;border-radius:6px;font-weight:700;cursor:pointer}
   .btn:hover{background:#fff}
   .btn-secondary{background:#444;color:#fff}
-  #status{color:#fff;font-weight:700;margin-top:8px}
+  #status{color:#fff;font-weight:700;margin-top:8px;min-height:1.4em}
   #preview{display:none;margin:10px auto 0;max-width:360px;border:1px solid var(--line);background:#000}
   #ocrOut{display:none;color:#bbb;white-space:pre-wrap;font-size:.9rem;line-height:1.25;border:1px solid var(--line);background:#0f0f0f;padding:8px;margin-top:10px;max-height:180px;overflow:auto}
   table{width:100%;border-collapse:collapse;color:#fff;margin-top:16px}
@@ -29,6 +29,8 @@
   .thumb{width:42px;height:42px;object-fit:cover;border:1px solid #444;cursor:pointer}
   .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:12px 0}
   .toolbar select,.toolbar input{background:#0f0f0f;border:1px solid #555;color:#fff;padding:8px;border-radius:6px}
+
+  /* Modal (mobile-safe) */
   .modal-back{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:9999;padding:10px}
   .modal{width:min(760px,94vw);max-height:min(88vh,900px);overflow:auto;background:#161616;border:1px solid var(--line);border-radius:12px;padding:16px;color:#eee;-webkit-overflow-scrolling:touch}
   .modal h2{margin:0 0 10px}
@@ -57,7 +59,7 @@
     <button class="btn" onclick="document.getElementById('libraryInput').click()">🖼 Choose from Library</button>
 
     <button class="btn" id="btnExtract">Extract</button>
-    <button class="btn btn-secondary" id="btnManual" disabled>✏️ Manual Fix</button>
+    <button class="btn btn-secondary" id="btnManual">✏️ Manual Fix</button>
     <button class="btn btn-secondary" id="btnCSV">Export CSV</button>
     <button class="btn btn-secondary" id="btnXLSX">Export Excel</button>
     <button class="btn btn-secondary" id="btnClear">Clear</button>
@@ -106,12 +108,12 @@
   </table>
 </div>
 
-<!-- Modal -->
+<!-- Manual Fix Modal -->
 <div id="modalBack" class="modal-back" role="dialog" aria-modal="true" aria-labelledby="mfTitle">
   <div class="modal">
     <h2 id="mfTitle">Manual Fix</h2>
     <div class="tip">
-      Edit any field. If one of <em>Net/VAT/Gross</em> is blank, it auto-recalculates.
+      Edit fields. If one of <em>Net/VAT/Gross</em> is blank, it auto-recalculates.
       <span id="calcHint" class="ok" style="display:none">✅ Totals OK</span>
       <span id="calcWarn" class="warn" style="display:none">⚠️ Totals don’t match</span>
     </div>
@@ -119,7 +121,7 @@
     <input type="hidden" id="mfId">
 
     <div class="flex">
-      <img id="mfShot" class="shot" alt="receipt image">
+      <img id="mfShot" class="shot" alt="receipt">
       <div class="grid" style="flex:1">
         <div><label>Supplier</label><input id="mfSupplier"></div>
         <div><label>VAT No</label><input id="mfVatNo"></div>
@@ -151,33 +153,36 @@
 </div>
 
 <script>
+  // ---------- Helpers ----------
   const $=s=>document.querySelector(s);
   const statusEl=$('#status'), previewEl=$('#preview'), ocrOut=$('#ocrOut');
-  let receipts=[]; const KEY='mpj_receipts_v3';
-  let lastImageDataURL=null, lastParsed=null;
-  let activeFilterCat='', activeSearch='';
-
-  // utils
-  const setStatus=m=>statusEl.textContent=m;
   const money=n=>(+n||0).toFixed(2);
   const toNum=v=>{ const n=parseFloat(String(v||'').replace(/[^0-9.]/g,'')); return isFinite(n)?n:0; };
   const totalsOK=(n,v,g)=> +((+n)+(+v)).toFixed(2)===+(+g).toFixed(2);
 
-  // storage
-  const saveStore=()=>localStorage.setItem(KEY, JSON.stringify(receipts));
-  const loadStore=()=>{ try{ receipts=JSON.parse(localStorage.getItem(KEY)||'[]'); }catch{ receipts=[]; } renderTable(); };
+  // ---------- localStorage self-test ----------
+  let storageOK=true;
+  try{ localStorage.setItem('__test','1'); localStorage.removeItem('__test'); }
+  catch{ storageOK=false; }
 
-  // file input
+  let receipts=[]; const KEY='mpj_receipts_v4';
+  const saveStore=()=>{ if(!storageOK){ setStatus('⚠️ Storage blocked (Private mode?). Rows won’t persist.'); return; } localStorage.setItem(KEY, JSON.stringify(receipts)); };
+  const loadStore=()=>{ if(!storageOK){ receipts=[]; renderTable(); return; } try{ receipts=JSON.parse(localStorage.getItem(KEY)||'[]'); }catch{ receipts=[]; } renderTable(); };
+
+  let lastImageDataURL=null, lastParsed=null;
+  let activeFilterCat='', activeSearch='';
+
+  // ---------- File selection ----------
   function handleFiles(list){
     if(!list?.length){ setStatus('No file selected'); return; }
     const r=new FileReader();
-    r.onload=()=>{ lastImageDataURL=r.result; previewEl.src=r.result; previewEl.style.display='block'; setStatus('Image loaded. Tap Extract.'); };
+    r.onload=()=>{ lastImageDataURL=r.result; previewEl.src=r.result; previewEl.style.display='block'; setStatus('Image loaded. Tap Extract or Manual Fix.'); };
     r.readAsDataURL(list[0]);
   }
   $('#cameraInput').addEventListener('change',e=>handleFiles(e.target.files));
   $('#libraryInput').addEventListener('change',e=>handleFiles(e.target.files));
 
-  // OCR preprocessing
+  // ---------- Preprocess for OCR ----------
   async function preprocessToDataURL(dataURL){
     const img=new Image(); img.src=dataURL; await img.decode?.();
     const pad=20, w=img.naturalWidth-pad*2, h=img.naturalHeight-pad*2;
@@ -196,7 +201,7 @@
     return c.toDataURL('image/png');
   }
 
-  // parse OCR text
+  // ---------- Parse OCR text ----------
   function parseReceipt(text){
     const lines=text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
     const supplier=(lines[0]||'').replace(/[^A-Za-z0-9 &\-']/g,'').slice(0,48);
@@ -216,29 +221,35 @@
     return {supplier,vatNo,date,desc,net:net??0,vat:vat??0,gross:gross??(net??0)+(vat??0)};
   }
 
-  // OCR
+  // ---------- OCR with timeout & fallback ----------
+  function withTimeout(p, ms){ return Promise.race([p, new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')), ms))]); }
+
   async function doOCR(){
     if(!lastImageDataURL){ setStatus('Pick a photo first.'); return; }
-    setStatus('Preprocessing…'); ocrOut.style.display='block'; ocrOut.textContent='…';
+    ocrOut.style.display='block'; ocrOut.textContent='…'; setStatus('Preprocessing…');
     try{
       const cleanURL=await preprocessToDataURL(lastImageDataURL);
       setStatus('Reading text…');
-      const {data:{text}}=await Tesseract.recognize(cleanURL,'eng',{
-        tessedit_pageseg_mode:'6',
-        tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,:;/\\-£'
-      });
-      const out=(text||'').replace(/\n{3,}/g,'\n\n').trim();
+      const res = await withTimeout(
+        Tesseract.recognize(cleanURL,'eng',{
+          tessedit_pageseg_mode:'6',
+          tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,:;/\\-£'
+        }),
+        15000
+      );
+      const out=(res?.data?.text||'').replace(/\n{3,}/g,'\n\n').trim();
       ocrOut.textContent=out||'(no text read)';
       lastParsed=parseReceipt(out);
-      $('#btnManual').disabled=false;
-      openManualFix({
-        ...lastParsed, method:'Card', purpose:'', category:'', image:lastImageDataURL, ocr:out
-      });
-      setStatus('OCR done. Review fields in Manual Fix.');
-    }catch(e){ console.error(e); setStatus('OCR failed. Try brighter photo.'); ocrOut.textContent='(OCR error)'; }
+      openManualFix({...lastParsed, method:'Card', purpose:'', category:'', image:lastImageDataURL, ocr:out});
+      setStatus('OCR done. Review in Manual Fix.');
+    }catch(e){
+      ocrOut.textContent='(OCR skipped/failed — enter manually)';
+      openManualFix({supplier:'',vatNo:'',date:'',desc:'Receipt',net:0,vat:0,gross:0,method:'Card',purpose:'',category:'',image:lastImageDataURL||'',ocr:''});
+      setStatus('OCR failed/timeout. Enter manually.');
+    }
   }
 
-  // modal
+  // ---------- Manual Fix modal ----------
   const back=$('#modalBack');
   function openManualFix(data){
     $('#mfId').value = data.id || '';
@@ -273,6 +284,11 @@
   $('#mfCancel').addEventListener('click',closeManualFix);
   $('#mfSave').addEventListener('click',()=>{
     const existingId=$('#mfId').value.trim();
+    let net=toNum($('#mfNet').value), vat=toNum($('#mfVAT').value), gross=toNum($('#mfGross').value);
+    if(!gross && (net||vat)) gross=+(net+vat).toFixed(2);
+    if(!net && gross && vat) net=+(gross-vat).toFixed(2);
+    if(!vat && gross && net) vat=+(gross-net).toFixed(2);
+
     const rec={
       id: existingId ? Number(existingId) : Date.now(),
       supplier: $('#mfSupplier').value.trim()||'—',
@@ -281,21 +297,14 @@
       purpose: $('#mfPurpose').value.trim(),
       category: $('#mfCategory').value || '',
       desc: $('#mfDesc').value.trim()||'Receipt',
-      net: toNum($('#mfNet').value),
-      vat: toNum($('#mfVAT').value),
-      gross: toNum($('#mfGross').value),
+      net, vat, gross,
       method: $('#mfMethod').value.trim()||'Card',
       image: $('#mfShot').src || lastImageDataURL || '',
       ocr: ocrOut.textContent || ''
     };
-    // final balance before save
-    if(rec.gross===0 && (rec.net||rec.vat)) rec.gross = +(rec.net + rec.vat).toFixed(2);
-    if(rec.net===0 && rec.gross && rec.vat) rec.net = +(rec.gross - rec.vat).toFixed(2);
-    if(rec.vat===0 && rec.gross && rec.net) rec.vat = +(rec.gross - rec.net).toFixed(2);
-
     upsertReceipt(rec);
     closeManualFix();
-    setStatus('Saved.');
+    setStatus(storageOK ? 'Saved.' : 'Saved (not persistent in Private mode).');
   });
 
   function upsertReceipt(rec){
@@ -304,7 +313,7 @@
     saveStore(); renderTable();
   }
 
-  // filters
+  // ---------- Filters ----------
   $('#btnApplyFilter').addEventListener('click',()=>{
     activeFilterCat = $('#filterCategory').value;
     activeSearch = ($('#searchText').value||'').toLowerCase();
@@ -314,7 +323,7 @@
     activeFilterCat=''; activeSearch=''; $('#filterCategory').value=''; $('#searchText').value=''; renderTable();
   });
 
-  // render
+  // ---------- Render ----------
   function renderTable(){
     const tb=document.querySelector('#receiptTable tbody');
     let list=[...receipts];
@@ -365,13 +374,13 @@
     });
   }
 
-  // exports
+  // ---------- Exports ----------
   function exportCSV(){
     if(!receipts.length) return alert('No rows.');
     const header=['Supplier','VAT No','Date','Purpose','Category','Description','Net','VAT','Gross','Method'];
     const rows=receipts.map(r=>[r.supplier,r.vatNo,r.date,r.purpose,r.category||'',r.desc,money(r.net),money(r.vat),money(r.gross),r.method]);
     const csv=[header,...rows].map(a=>a.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
-    const blob=new Blob([csv],{type:'text/csv;charset=utf-8'}); const a=document.createElement('a');
+    const blob=new Blob([csv],{type:'text/csv;charset=utf-8'}), a=document.createElement('a');
     a.href=URL.createObjectURL(blob); a.download='receipts.csv'; a.click(); URL.revokeObjectURL(a.href);
   }
   function exportXLSX(){
@@ -382,7 +391,7 @@
     XLSX.utils.book_append_sheet(wb,ws,'Receipts'); XLSX.writeFile(wb,'receipts.xlsx');
   }
 
-  // buttons
+  // ---------- Buttons ----------
   document.getElementById('btnExtract').addEventListener('click',doOCR);
   document.getElementById('btnManual').addEventListener('click',()=>openManualFix({
     id:'', supplier:'', vatNo:'', date:'', purpose:'', category:'', desc:'Receipt',
@@ -390,9 +399,14 @@
   }));
   document.getElementById('btnCSV').addEventListener('click',exportCSV);
   document.getElementById('btnXLSX').addEventListener('click',exportXLSX);
-  document.getElementById('btnClear').addEventListener('click',()=>{ if(confirm('Clear table and stored receipts?')){ localStorage.removeItem(KEY); receipts=[]; renderTable(); setStatus('Cleared.'); ocrOut.style.display='none'; ocrOut.textContent=''; } });
+  document.getElementById('btnClear').addEventListener('click',()=>{ 
+    if(confirm('Clear table and stored receipts?')){
+      receipts=[]; if(storageOK) localStorage.removeItem(KEY);
+      renderTable(); setStatus('Cleared.'); ocrOut.style.display='none'; ocrOut.textContent='';
+    }
+  });
 
-  // init
+  // ---------- Init ----------
   loadStore();
 </script>
 </body>
