@@ -149,4 +149,4 @@ $("#btnCSV").onclick = ()=>{
   const a = document.createElement("a"); a.href=url; a.download="receipts.csv"; a.click(); URL.revokeObjectURL(url);
 };
 $("#btnClear").onclick = ()=>{ currentFile=null; preview.removeAttribute("src"); ocrText.textContent=""; status("Ready"); };
-modal.addEventListener("click",e=>{ if(e.target===modal) closeManual(); });
+modal.addEventListener("click",e=>{ if(e.targe
