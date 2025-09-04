@@ -51,7 +51,7 @@ $("#btnLibrary").onclick = ()=> $("#library").click();
   });
 });
 
-/* ===== Parse ===== */
+/* ===== Parse with VAT auto-calc ===== */
 function parseText(t){
   let dateISO = new Date().toISOString().slice(0,10);
   const m1 = t.match(/\b(\d{4}-\d{2}-\d{2})\b/);
@@ -60,12 +60,22 @@ function parseText(t){
     const s = (m1?m1[1]:m2[1].split('/').reverse().join('-'));
     const d = new Date(s); if(!isNaN(+d)) dateISO = d.toISOString().slice(0,10);
   }
-  const gross = +(t.match(/total[^0-9]*([0-9]+\.[0-9]{2})/i)?.[1]||0);
-  const vat   = +(t.match(/\bvat[^0-9]*([0-9]+\.[0-9]{2})/i)?.[1]||0);
-  const net   = gross && vat ? gross - vat : 0;
-  const top   = (t.split(/\n/)[0]||"").trim().slice(0,40)||"Supplier";
+  let gross = +(t.match(/\b(total|gross)[^0-9]*([0-9]+\.[0-9]{2})/i)?.[2]||0);
+  let net   = +(t.match(/\b(net|subtotal)[^0-9]*([0-9]+\.[0-9]{2})/i)?.[2]||0);
+  let vat   = +(t.match(/\bvat[^0-9]*([0-9]+\.[0-9]{2})/i)?.[1]||0);
+
+  const rate = 0.20; // default 20% for OCR parse
+  if(gross && net && !vat) vat = gross - net;
+  if(gross && vat && !net) net = gross - vat;
+  if(net && vat && !gross) gross = net + vat;
+  if(gross && !net && !vat){ net = gross/(1+rate); vat = gross - net; }
+  if(net && !gross && !vat){ gross = net*(1+rate); vat = gross - net; }
+  if(vat && !gross && !net){ gross = vat/rate; net = gross - vat; }
+
+  const top = (t.split(/\n/)[0]||"").trim().slice(0,40)||"Supplier";
   return {supplier: top, vatNo:"", date: dateISO, description:"Receipt", notes:"",
-    category:"", net, vat, gross, method:"Card", audit:"OCR"};
+    category:"", net:+net.toFixed(2), vat:+vat.toFixed(2), gross:+gross.toFixed(2),
+    method:"Card", audit:"OCR"};
 }
 
 /* ===== Modal ===== */
@@ -73,9 +83,10 @@ const modal = $("#modal");
 const M = {
   supplier:$("#mSupplier"), vatNo:$("#mVatNo"), date:$("#mDate"), desc:$("#mDesc"),
   notes:$("#mNotes"), cat:$("#mCat"), net:$("#mNet"), vat:$("#mVat"), gross:$("#mGross"),
-  method:$("#mMethod"), preview:$("#modalPreview")
+  method:$("#mMethod"), preview:$("#modalPreview"), rate:$("#mRate")
 };
 let pending = null;
+const getRate = ()=> (parseFloat(M.rate?.value)||20)/100;
 
 function openManual(rec){
   M.preview.src = preview.src||"";
@@ -94,16 +105,21 @@ function openManual(rec){
 function closeManual(){ modal.classList.remove("show"); }
 
 function recalc(){
+  const r = getRate();
   let n=parseFloat(M.net.value)||0, v=parseFloat(M.vat.value)||0, g=parseFloat(M.gross.value)||0;
-  const filled = [!!M.net.value, !!M.vat.value, !!M.gross.value].filter(Boolean).length;
-  if(filled>=2){
-    if(!M.net.value)   n = g - v;
-    if(!M.vat.value)   v = g - n;
-    if(!M.gross.value) g = n + v;
+  const hasN = !!M.net.value.trim(), hasV = !!M.vat.value.trim(), hasG = !!M.gross.value.trim();
+  if(hasN && hasV && !hasG) g=n+v;
+  else if(hasG && hasN && !hasV) v=g-n;
+  else if(hasG && hasV && !hasN) n=g-v;
+  else {
+    if(hasG && !hasN && !hasV){ n=g/(1+r); v=g-n; }
+    if(hasN && !hasG && !hasV){ g=n*(1+r); v=g-n; }
+    if(hasV && !hasN && !hasG){ g=v/r; n=g-v; }
   }
   M.net.value=fmt(n); M.vat.value=fmt(v); M.gross.value=fmt(g);
 }
 [M.net,M.vat,M.gross].forEach(i=>i.addEventListener("input",recalc));
+M.rate?.addEventListener("change", recalc);
 
 /* ===== Buttons ===== */
 $("#btnExtract").onclick = ()=>{
