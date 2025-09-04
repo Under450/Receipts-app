@@ -1,13 +1,15 @@
-/* ========= HMRC Receipt Extractor – app.js ========= */
+/* ========= HMRC Receipt Extractor – app.js (full) ========= */
 
-/* ---------- Helpers ---------- */
-const $ = s => document.querySelector(s);
+/* ---------- Shortcuts ---------- */
+const $  = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
 
+/* ---------- State ---------- */
 const STORE_KEY = "mpj_receipts_v1";
-let receipts = [];     // in-memory copy (also mirrored to localStorage)
+let receipts   = [];
+let pendingRec = null;     // holds current OCR/demo record until user presses Save
 
-/* ---------- UI refs ---------- */
+/* ---------- DOM ---------- */
 const tblBody      = $("#receiptTable tbody");
 const totalNetEl   = $("#totalNet");
 const totalVatEl   = $("#totalVat");
@@ -15,6 +17,8 @@ const totalGrossEl = $("#totalGross");
 const ocrBox       = $("#ocrText");
 const statusBadge  = $("#statusBadge");
 const previewImg   = $("#previewImg");
+
+/* Manual Fix modal fields */
 const manual = {
   modal:   $("#manualFixModal"),
   thumb:   $("#manualThumb"),
@@ -32,16 +36,14 @@ const manual = {
   cancel:  $("#cancelManualFix"),
 };
 
-/* ---------- Persistence ---------- */
+/* ---------- Storage ---------- */
 function saveStore(){
   try { localStorage.setItem(STORE_KEY, JSON.stringify(receipts)); }
   catch(e){ console.warn("localStorage save failed:", e); }
 }
 function loadStore(){
-  try {
-    const raw = localStorage.getItem(STORE_KEY);
-    receipts = raw ? JSON.parse(raw) : [];
-  } catch(e){ receipts = []; }
+  try { receipts = JSON.parse(localStorage.getItem(STORE_KEY) || "[]"); }
+  catch(e){ receipts = []; }
 }
 function clearStore(){
   receipts = [];
@@ -73,90 +75,59 @@ function renderTable(){
 }
 
 function updateTotals(){
-  let tNet=0,tVat=0,tGross=0;
-  receipts.forEach(r => {
-    tNet   += Number(r.net||0);
-    tVat   += Number(r.vat||0);
-    tGross += Number(r.gross||0);
-  });
-  totalNetEl.textContent   = fmt(tNet);
-  totalVatEl.textContent   = fmt(tVat);
-  totalGrossEl.textContent = fmt(tGross);
+  let tn=0,tv=0,tg=0;
+  receipts.forEach(r=>{ tn+=+r.net||0; tv+=+r.vat||0; tg+=+r.gross||0; });
+  totalNetEl.textContent   = fmt(tn);
+  totalVatEl.textContent   = fmt(tv);
+  totalGrossEl.textContent = fmt(tg);
 }
 
-/* ---------- Image preview is set in index.html ---------- */
-/* manual.thumb src will be set there too */
+/* ---------- Parse (very light heuristics on OCR text) ---------- */
+function toISODate(s){
+  const m = s && s.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+  if (m){
+    const [ , dd, mm, yy ] = m;
+    const y = yy.length===2 ? ("20"+yy) : yy;
+    return `${y.padStart(4,"0")}-${String(mm).padStart(2,"0")}-${String(dd).padStart(2,"0")}`;
+  }
+  const t = s && Date.parse(s);
+  return isNaN(t) ? "" : new Date(t).toISOString().slice(0,10);
+}
 
-/* ---------- OCR / Extract (regex from visible text or demo) ---------- */
 function parseFromText(txt){
-  // very light heuristics
-  const supplier = (() => {
-    const m = txt.match(/^\s*([A-Z0-9 &'\-]{3,})\s*$/m);
-    return m ? m[1].trim() : "";
-  })();
+  const supplier = (txt.match(/^\s*([A-Z0-9 &'\-]{3,})\s*$/m) || [,""])[1].trim();
 
-  // date like 11/06/2025 or 11 Jun 2025
   const date = (() => {
     const m1 = txt.match(/\b(\d{1,2}\/\d{1,2}\/\d{2,4})\b/);
     const m2 = txt.match(/\b(\d{1,2}\s+[A-Za-z]{3,9}\s+\d{2,4})\b/);
-    return m1?.[1] || m2?.[1] || "";
+    return toISODate(m1?.[1] || m2?.[1] || "") || new Date().toISOString().slice(0,10);
   })();
 
-  // totals: try VAT + Gross lines
-  let gross = 0, vat = 0, net = 0;
+  let gross=0, vat=0, net=0;
   const g = txt.match(/(?:TOTAL|Gross)\D+(\d+\.\d{2})/i);
-  if (g) gross = Number(g[1]);
-  const v = txt.match(/VAT\D+(\d+\.\d{2})/i);
-  if (v) vat = Number(v[1]);
+  if (g) gross = +g[1];
+  const v = txt.match(/VAT(?:\s*@\s*\d+%|\b)\D+(\d+\.\d{2})/i);
+  if (v) vat = +v[1];
   if (gross && vat) net = +(gross - vat).toFixed(2);
-  if (!vat && gross){
-    // Fallback VAT @20%
-    vat = +(gross * 0.2/1.2).toFixed(2);
-    net = +(gross - vat).toFixed(2);
-  }
+  if (!vat && gross){ vat = +(gross*0.2/1.2).toFixed(2); net = +(gross - vat).toFixed(2); }
 
-  // description: first line that looks like "Order/Invoice/Ref"
   const d = txt.match(/(Order|Invoice|Ref|Details)[^\n]{0,60}/i);
   const description = d ? d[0].trim() : "Receipt";
 
-  return { supplier, vatNo:"", date, description, notes:"", category:"Other",
-           net, vat, gross, method:"Card", audit:"OCR" };
+  return {
+    supplier, vatNo:"", date, description, notes:"",
+    category:"Other", net, vat, gross, method:"Card", audit:"OCR"
+  };
 }
 
-$("#btnExtract").addEventListener("click", () => {
-  const txt = (ocrBox?.textContent || "").trim();
-  let rec;
-  if (txt.length > 10){
-    rec = parseFromText(txt);
-    statusBadge.textContent = "Parsed from OCR text";
-  } else {
-    // Demo row (if no OCR text provided)
-    rec = {
-      supplier: "Demo Store", vatNo: "GB123456", date: new Date().toISOString().slice(0,10),
-      description: "Office Supplies", notes:"", category:"Office Supplies",
-      net:100, vat:20, gross:120, method:"Card", audit:"Demo"
-    };
-    statusBadge.textContent = "Demo row added";
-  }
-  receipts.push(rec);
-  saveStore();
-  renderTable();
-
-  // Pre-fill manual modal with last record
-  fillManualFrom(rec);
-  openManual();
-});
-
-/* ---------- Manual Fix modal ---------- */
+/* ---------- Manual modal controls ---------- */
 function openManual(){ manual.modal.classList.add("open"); }
 function closeManual(){ manual.modal.classList.remove("open"); }
 
 function fillManualFrom(r){
   manual.supplier.value = r.supplier || "";
   manual.vatNo.value    = r.vatNo || "";
-  // normalise date to yyyy-mm-dd if possible
-  const iso = /^\d{4}-\d{2}-\d{2}$/.test(r.date) ? r.date : toISODate(r.date);
-  manual.date.value     = iso || new Date().toISOString().slice(0,10);
+  manual.date.value     = /^\d{4}-\d{2}-\d{2}$/.test(r.date||"") ? r.date : toISODate(r.date)||new Date().toISOString().slice(0,10);
   manual.desc.value     = r.description || "";
   manual.notes.value    = r.notes || "";
   manual.cat.value      = r.category || "";
@@ -165,58 +136,66 @@ function fillManualFrom(r){
   manual.gross.value    = Number(r.gross||0).toFixed(2);
   manual.method.value   = r.method || "Card";
 }
-function toISODate(s){
-  // very tolerant parser for "11 Jun 2025" or "11/06/2025"
-  const d1 = s && s.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
-  if (d1){
-    const [ , dd, mm, yy ] = d1;
-    const y = String(yy).length===2 ? ("20"+yy) : yy;
-    return `${y.padStart(4,"0")}-${String(mm).padStart(2,"0")}-${String(dd).padStart(2,"0")}`;
-  }
-  const d2 = s && Date.parse(s);
-  if (!isNaN(d2)){ const d = new Date(d2); return d.toISOString().slice(0,10); }
-  return "";
-}
 
-$("#btnManualFix").addEventListener("click", () => {
-  // open with blank or last
-  const last = receipts[receipts.length-1] || {
-    supplier:"", vatNo:"", date:new Date().toISOString().slice(0,10),
-    description:"", notes:"", category:"", net:0, vat:0, gross:0, method:"Card", audit:"Manual"
-  };
-  fillManualFrom(last);
-  openManual();
-});
-manual.cancel.addEventListener("click", closeManual);
-
-/* Auto-calc: keep Net/VAT/Gross consistent */
+/* Keep Net/VAT/Gross consistent */
 function recalcFrom(which){
-  let net  = parseFloat(manual.net.value)   || 0;
-  let vat  = parseFloat(manual.vat.value)   || 0;
-  let gross= parseFloat(manual.gross.value) || 0;
+  let n = parseFloat(manual.net.value)   || 0;
+  let v = parseFloat(manual.vat.value)   || 0;
+  let g = parseFloat(manual.gross.value) || 0;
 
-  if (which==="gross"){ // user edited gross -> derive VAT if Net present else derive Net @20%
-    if (net){ vat = +(gross - net).toFixed(2); }
-    else if (vat){ net = +(gross - vat).toFixed(2); }
-    else { // assume 20% VAT included
-      vat = +(gross * 0.2/1.2).toFixed(2);
-      net = +(gross - vat).toFixed(2);
-    }
+  if (which==="gross"){
+    if (n){ v = +(g - n).toFixed(2); }
+    else if (v){ n = +(g - v).toFixed(2); }
+    else { v = +(g*0.2/1.2).toFixed(2); n = +(g - v).toFixed(2); }
   } else if (which==="net" || which==="vat"){
-    if (net && vat) gross = +(net + vat).toFixed(2);
-    else if (gross && net && which==="net") vat = +(gross - net).toFixed(2);
-    else if (gross && vat && which==="vat") net = +(gross - vat).toFixed(2);
+    if (n && v) g = +(n + v).toFixed(2);
+    else if (g && which==="net") v = +(g - n).toFixed(2);
+    else if (g && which==="vat") n = +(g - v).toFixed(2);
   }
 
-  manual.net.value   = net.toFixed(2);
-  manual.vat.value   = vat.toFixed(2);
-  manual.gross.value = gross.toFixed(2);
+  manual.net.value   = n.toFixed(2);
+  manual.vat.value   = v.toFixed(2);
+  manual.gross.value = g.toFixed(2);
 }
 manual.net.addEventListener("input",  ()=>recalcFrom("net"));
 manual.vat.addEventListener("input",  ()=>recalcFrom("vat"));
 manual.gross.addEventListener("input",()=>recalcFrom("gross"));
 
-/* Save Manual Fix -> append a new row */
+/* ---------- Buttons ---------- */
+
+// Extract: parse OCR text (or demo) -> prefill manual modal (do NOT add yet)
+$("#btnExtract").addEventListener("click", () => {
+  const txt = (ocrBox?.textContent || "").trim();
+  let rec;
+  if (txt.length > 10){
+    rec = parseFromText(txt);
+    statusBadge.textContent = "Parsed from OCR text – review & Save";
+  } else {
+    rec = {
+      supplier:"Demo Store", vatNo:"GB123456",
+      date:new Date().toISOString().slice(0,10),
+      description:"Office Supplies", notes:"",
+      category:"Office Supplies", net:100, vat:20, gross:120,
+      method:"Card", audit:"OCR"
+    };
+    statusBadge.textContent = "Demo prefilled – review & Save";
+  }
+  pendingRec = rec;
+  fillManualFrom(rec);
+  openManual();
+});
+
+// Open Manual Fix empty/new
+$("#btnManualFix").addEventListener("click", () => {
+  pendingRec = null;
+  fillManualFrom({
+    supplier:"", vatNo:"", date:new Date().toISOString().slice(0,10),
+    description:"", notes:"", category:"", net:0, vat:0, gross:0, method:"Card"
+  });
+  openManual();
+});
+
+// Save Manual -> add exactly one row
 manual.save.addEventListener("click", () => {
   const rec = {
     supplier: manual.supplier.value.trim(),
@@ -229,16 +208,19 @@ manual.save.addEventListener("click", () => {
     vat:   +(parseFloat(manual.vat.value)||0).toFixed(2),
     gross: +(parseFloat(manual.gross.value)||0).toFixed(2),
     method: manual.method.value,
-    audit:  "✔ Manual"
+    audit:  pendingRec ? "✔ OCR+Manual" : "✔ Manual"
   };
   receipts.push(rec);
+  pendingRec = null;
   saveStore();
   renderTable();
   closeManual();
-  statusBadge.textContent = "Manual item saved";
+  statusBadge.textContent = "Saved";
 });
 
-/* ---------- Export CSV ---------- */
+manual.cancel.addEventListener("click", () => { pendingRec = null; closeManual(); });
+
+// Export CSV
 $("#btnExportCsv").addEventListener("click", () => {
   const head = ["Supplier","VAT No","Date","Description / Notes","Net","VAT","Gross","Method","Category","Audit"];
   const lines = [head.join(",")];
@@ -257,7 +239,7 @@ $("#btnExportCsv").addEventListener("click", () => {
   URL.revokeObjectURL(url);
 });
 
-/* ---------- “PDF” (printable page) ---------- */
+// Export PDF (printable window)
 $("#btnExportPdf").addEventListener("click", () => {
   const w = window.open("", "_blank");
   const rows = receipts.map(r=>`
@@ -268,8 +250,8 @@ $("#btnExportPdf").addEventListener("click", () => {
       <td>${r.method}</td><td>${r.category}</td><td>${r.audit}</td>
     </tr>`).join("");
 
-  w.document.write(`<!doctype html>
-  <html><head><meta charset="utf-8"><title>Receipts PDF</title>
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8">
+  <title>Receipts Report</title>
   <style>
     body{font-family:Arial;margin:24px}
     h1{margin:0 0 12px}
@@ -279,26 +261,30 @@ $("#btnExportPdf").addEventListener("click", () => {
   </style></head><body>
   <h1>Receipts Report</h1>
   <table>
-  <thead><tr>
-    <th>Supplier</th><th>VAT No</th><th>Date</th><th>Description / Notes</th>
-    <th>Net</th><th>VAT</th><th>Gross</th><th>Method</th><th>Category</th><th>Audit</th>
-  </tr></thead>
-  <tbody>${rows}</tbody>
+    <thead><tr>
+      <th>Supplier</th><th>VAT No</th><th>Date</th><th>Description / Notes</th>
+      <th>Net</th><th>VAT</th><th>Gross</th><th>Method</th><th>Category</th><th>Audit</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
   </table>
   </body></html>`);
-  w.document.close();
-  w.focus();
-  setTimeout(()=>w.print(), 400);
+  w.document.close(); w.focus(); setTimeout(()=>w.print(), 400);
 });
 
-/* ---------- Clear ---------- */
+/* Light Clear: reset only current OCR/preview */
 $("#btnClear").addEventListener("click", () => {
-  if (!confirm("Clear all receipts?")) return;
+  pendingRec = null;
+  if (ocrBox) ocrBox.textContent = "";
+  if (previewImg) previewImg.removeAttribute("src");
+  statusBadge.textContent = "Ready for next receipt";
+});
+
+/* Optional hard clear button with id="btnClearAll" */
+$("#btnClearAll")?.addEventListener("click", () => {
+  if (!confirm("Delete ALL saved receipts?")) return;
   clearStore();
   renderTable();
-  ocrBox.textContent = "";
-  previewImg.removeAttribute("src");
-  statusBadge.textContent = "Cleared";
+  statusBadge.textContent = "All receipts cleared";
 });
 
 /* ---------- Boot ---------- */
