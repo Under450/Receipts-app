@@ -1,46 +1,25 @@
-/* ======= STATE ======= */
-const LS_KEY = "receipts_v1";
-let receipts = JSON.parse(localStorage.getItem(LS_KEY) || "[]");
-let pendingRec = null;
+/* =========================
+   HMRC Receipt Extractor
+   app.js  — full version
+   ========================= */
 
-/* ======= DOM ======= */
+/* --------- helpers / state --------- */
 const $ = s => document.querySelector(s);
-const ocrBox     = $("#ocrText");
-const previewImg = $("#previewImg");
-const statusEl   = $("#status");
-
-const inputCamera  = $("#inputCamera");
-const inputLibrary = $("#inputLibrary");
-
-const modal = $("#manualModal");
-const M = {
-  supplier: $("#manualSupplier"),
-  vatNo:    $("#manualVatNo"),
-  date:     $("#manualDate"),
-  desc:     $("#manualDesc"),
-  notes:    $("#manualNotes"),
-  cat:      $("#manualCat"),
-  net:      $("#manualNet"),
-  vat:      $("#manualVat"),
-  gross:    $("#manualGross"),
-  method:   $("#manualMethod"),
-  save:     $("#manualSave"),
-  cancel:   $("#manualCancel"),
-  preview:  $("#modalPreview")
-};
-
-/* ======= UTIL ======= */
 const fmt = n => (+n || 0).toFixed(2);
-const setStatus = t => statusEl.textContent = t;
-function saveStore(){ localStorage.setItem(LS_KEY, JSON.stringify(receipts)); }
 
-/* ======= RENDER TABLE ======= */
-function renderTable(){
-  const tb = $("#receiptsBody");
+let store   = JSON.parse(localStorage.getItem("receipts") || "[]");
+let pending = null;          // the receipt being edited before Save
+let currentFile = null;      // last chosen image for preview only
+
+function saveStore(){ localStorage.setItem("receipts", JSON.stringify(store)); }
+function status(t){ const el = $("#status"); if(el) el.textContent = t; }
+
+/* --------- render table --------- */
+function render(){
+  const tb = $("#tbody"); if(!tb) return;
   tb.innerHTML = "";
   let tn=0,tv=0,tg=0;
-
-  receipts.forEach(r=>{
+  store.forEach(r=>{
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${r.supplier||""}</td>
@@ -54,84 +33,128 @@ function renderTable(){
       <td>${r.audit||""}</td>
     `;
     tb.appendChild(tr);
-    tn += +r.net || 0; tv += +r.vat || 0; tg += +r.gross || 0;
+    tn += +r.net   || 0;
+    tv += +r.vat   || 0;
+    tg += +r.gross || 0;
   });
-
-  $("#totalNet").textContent   = fmt(tn);
-  $("#totalVat").textContent   = fmt(tv);
-  $("#totalGross").textContent = fmt(tg);
+  $("#tNet").textContent   = fmt(tn);
+  $("#tVat").textContent   = fmt(tv);
+  $("#tGross").textContent = fmt(tg);
 }
+render();
 
-/* ======= OCR ======= */
-async function runOCR(file){
-  if(!file) return;
-  // show preview
-  const url = URL.createObjectURL(file);
-  previewImg.src = url;
-  M.preview.src = url;
+/* --------- image inputs / OCR --------- */
+const preview = $("#preview");
+const ocrText = $("#ocrText");
 
-  // reset & status
-  ocrBox.textContent = "";
-  setStatus("OCR: loading…");
+$("#btnCamera")?.addEventListener("click", ()=> $("#camera").click());
+$("#btnLibrary")?.addEventListener("click", ()=> $("#library").click());
 
-  try{
-    const { data:{ text } } = await Tesseract.recognize(file, 'eng', {
-      logger: m => m.status && setStatus(`OCR: ${m.status}`)
-    });
-    ocrBox.textContent = (text || "").trim();
-    setStatus(ocrBox.textContent ? "OCR complete" : "OCR returned no text");
-  }catch(e){
-    alert("OCR error: " + e.message);
-    setStatus("OCR failed");
-  }
-}
-
-/* hook inputs to OCR immediately */
-[inputCamera, inputLibrary].forEach(inp=>{
-  inp.addEventListener("change", e=>{
+["camera","library"].forEach(id=>{
+  const el = $("#"+id);
+  if(!el) return;
+  el.addEventListener("change", e=>{
     const f = e.target.files && e.target.files[0];
     if(f) runOCR(f);
   });
 });
 
-/* ======= BASIC PARSER (light heuristics) ======= */
+async function runOCR(file){
+  currentFile = file;
+  if(preview) preview.src = URL.createObjectURL(file);
+  if(ocrText) ocrText.textContent = "";
+  status("OCR: loading…");
+  try{
+    const { data:{ text } } = await Tesseract.recognize(file,'eng',{
+      logger:m=> m.status && status("OCR: "+m.status)
+    });
+    const t = (text||"").trim();
+    if(ocrText) ocrText.textContent = t;
+    status(t ? "OCR complete" : "OCR returned no text");
+  }catch(err){
+    alert("OCR error: " + err.message);
+    status("OCR failed");
+  }
+}
+
+/* --------- parsing from OCR text --------- */
 function parseFromText(txt){
-  // Date: YYYY-MM-DD or DD/MM/YYYY
+  // Date (YYYY-MM-DD or DD/MM/YYYY)
   let dateISO = new Date().toISOString().slice(0,10);
   const m1 = txt.match(/\b(\d{4}-\d{2}-\d{2})\b/);
   const m2 = txt.match(/\b(\d{2}\/\d{2}\/\d{4})\b/);
   if(m1||m2){
-    const s = m1 ? m1[1] : m2[1].split('/').reverse().join('-');
-    const d = new Date(s); if(!isNaN(+d)) dateISO = d.toISOString().slice(0,10);
+    const s = m1 ? m1[1] : m2[1].split("/").reverse().join("-");
+    const d = new Date(s);
+    if(!isNaN(+d)) dateISO = d.toISOString().slice(0,10);
   }
 
-  // Totals (very loose)
-  const gross = +(txt.match(/total[^0-9]*([0-9]+\.[0-9]{2})/i)?.[1]||0);
-  const vat   = +(txt.match(/\bvat[^0-9]*([0-9]+\.[0-9]{2})/i)?.[1]||0);
-  const net   = gross ? +(gross - vat) : 0;
+  // Try to find Gross / Net / VAT individually
+  // (accepts lines like "Total 43.96", "Gross: 43.96", "Net 36.63", "VAT 7.33")
+  const grossMatch = txt.match(/\b(total|gross)\b[^\d]*([\d]+(?:\.\d{2})?)/i);
+  const netMatch   = txt.match(/\b(net|subtotal)\b[^\d]*([\d]+(?:\.\d{2})?)/i);
+  const vatMatch   = txt.match(/\bvat\b[^\d]*([\d]+(?:\.\d{2})?)/i);
 
-  const topLine = (txt.split(/\n/)[0]||"").trim().slice(0,50) || "Supplier";
+  let gross = grossMatch ? +grossMatch[2] : 0;
+  let net   = netMatch   ? +netMatch[2]   : 0;
+  let vat   = vatMatch   ? +vatMatch[1]   : 0;
+
+  // If we only have some values, back-calculate the missing one
+  if(gross && net && !vat) vat = +(gross - net);
+  if(gross && vat && !net) net = +(gross - vat);
+  if(net && vat && !gross) gross = +(net + vat);
+
+  // Fallback: if none found but one money-looking number exists near "VAT Breakdown"
+  if(!(gross||net||vat)){
+    const money = txt.match(/(\d+\.\d{2})/g);
+    if(money && money.length){
+      gross = +money[money.length-1];
+      vat = 0; net = gross;
+    }
+  }
+
+  const firstLine = (txt.split(/\n/)[0]||"").trim().slice(0,40) || "Supplier";
 
   return {
-    supplier: topLine,
+    supplier: firstLine,
     vatNo: "",
     date: dateISO,
     description: "Receipt",
     notes: "",
     category: "",
-    net, vat, gross,
+    net: +fmt(net),
+    vat: +fmt(vat),
+    gross: +fmt(gross),
     method: "Card",
     audit: "OCR"
   };
 }
 
-/* ======= MANUAL MODAL ======= */
+/* --------- manual modal --------- */
+const modal = $("#modal");
+const M = {
+  supplier: $("#mSupplier"),
+  vatNo:    $("#mVatNo"),
+  date:     $("#mDate"),
+  desc:     $("#mDesc"),
+  notes:    $("#mNotes"),
+  cat:      $("#mCat"),
+  net:      $("#mNet"),
+  vat:      $("#mVat"),
+  gross:    $("#mGross"),
+  method:   $("#mMethod"),
+  preview:  $("#modalPreview"),
+  save:     $("#mSave"),
+  cancel:   $("#mCancel")
+};
+
 function openManual(rec){
+  if(M.preview && preview?.src) M.preview.src = preview.src;
   M.supplier.value = rec.supplier || "";
-  M.vatNo.value    = rec.vatNo    || "";
-  M.date.value     = rec.date     || new Date().toISOString().slice(0,10);
+  M.vatNo.value    = rec.vatNo || "";
+  M.date.value     = rec.date || new Date().toISOString().slice(0,10);
   M.desc.value     = rec.description || "";
-  M.notes.value    = rec.notes    || "";
+  M.notes.value    = rec.notes || "";
   M.cat.value      = rec.category || "";
   M.net.value      = fmt(rec.net);
   M.vat.value      = fmt(rec.vat);
@@ -141,53 +164,40 @@ function openManual(rec){
 }
 function closeManual(){ modal.style.display = "none"; }
 
-/* auto-calc whenever any of net/vat/gross updates (if 2 are present) */
+/* auto-calc: when two of net/vat/gross are present, fill the third */
 function recalc(){
-  let n = parseFloat(M.net.value)||0,
-      v = parseFloat(M.vat.value)||0,
-      g = parseFloat(M.gross.value)||0;
-  const filled = [M.net.value, M.vat.value, M.gross.value].filter(x=>x!==""&&x!=null).length;
+  let n = parseFloat(M.net.value)   || 0;
+  let v = parseFloat(M.vat.value)   || 0;
+  let g = parseFloat(M.gross.value) || 0;
+  const filled = [M.net.value, M.vat.value, M.gross.value].filter(x=>x && x.trim()!=="").length;
   if(filled >= 2){
-    if(!M.net.value)   n = g - v;
-    if(!M.vat.value)   v = g - n;
-    if(!M.gross.value) g = n + v;
+    if(!M.net.value.trim())   n = g - v;
+    if(!M.vat.value.trim())   v = g - n;
+    if(!M.gross.value.trim()) g = n + v;
   }
   M.net.value   = fmt(n);
   M.vat.value   = fmt(v);
   M.gross.value = fmt(g);
 }
-[M.net,M.vat,M.gross].forEach(el=>el.addEventListener("input",recalc));
+[M.net,M.vat,M.gross].forEach(el=> el?.addEventListener("input", recalc));
 
-/* ======= DEDUP CHECK ======= */
-function isDuplicate(r){
-  return receipts.some(x =>
-    (x.supplier||"").toUpperCase() === (r.supplier||"").toUpperCase() &&
-    (x.date||"") === (r.date||"") &&
-    fmt(x.gross) === fmt(r.gross)
-  );
-}
-
-/* ======= BUTTONS ======= */
-$("#btnCamera").addEventListener("click", ()=> inputCamera.click());
-$("#btnLibrary").addEventListener("click", ()=> inputLibrary.click());
-
-$("#btnExtract").addEventListener("click", ()=>{
-  const txt = (ocrBox.textContent || "").trim();
-  if(txt.length < 10){
+/* --------- actions --------- */
+$("#btnExtract")?.addEventListener("click", ()=>{
+  const t = (ocrText?.textContent || "").trim();
+  if(t.length < 8){
     alert("No OCR text detected yet.\n\nTake/choose a photo, wait for the OCR text to appear, then press Extract.");
-    setStatus("Upload & OCR first");
+    status("Upload & OCR first");
     return;
   }
-  const rec = parseFromText(txt);
-  pendingRec = rec;
-  openManual(rec);
-  setStatus("Parsed from OCR – review & Save");
+  pending = parseFromText(t);
+  openManual(pending);
+  status("Parsed from OCR – review & Save");
 });
 
-M.cancel.addEventListener("click", ()=>{ pendingRec=null; closeManual(); });
+M.cancel?.addEventListener("click", ()=>{ pending=null; closeManual(); });
 
-M.save.addEventListener("click", ()=>{
-  const rec = {
+M.save?.addEventListener("click", ()=>{
+  const r = {
     supplier: M.supplier.value.trim(),
     vatNo:    M.vatNo.value.trim(),
     date:     M.date.value,
@@ -198,43 +208,49 @@ M.save.addEventListener("click", ()=>{
     vat:      +(parseFloat(M.vat.value)||0),
     gross:    +(parseFloat(M.gross.value)||0),
     method:   M.method.value,
-    audit:    pendingRec ? "✔ OCR+Manual" : "✔ Manual"
+    audit:    pending ? "✔ OCR+Manual" : "✔ Manual"
   };
 
-  if(isDuplicate(rec) && !confirm("This looks like a duplicate (same supplier, date, gross). Add it anyway?")){
-    setStatus("Duplicate blocked");
-    return;
-  }
+  // simple duplicate guard (supplier + date + gross)
+  const dup = store.some(x =>
+    (x.supplier||"").toUpperCase() === r.supplier.toUpperCase() &&
+    x.date === r.date &&
+    fmt(x.gross) === fmt(r.gross)
+  );
+  if(dup && !confirm("Looks like a duplicate. Add anyway?")) return;
 
-  receipts.push(rec);
-  pendingRec = null;
+  store.push(r);
   saveStore();
-  renderTable();
+  render();
+  pending = null;
   closeManual();
-  setStatus("Saved");
+  status("Saved");
 });
 
-$("#btnCSV").addEventListener("click", ()=>{
+$("#btnCSV")?.addEventListener("click", ()=>{
   const rows = [["Supplier","VAT No","Date","Description","Notes","Net","VAT","Gross","Method","Audit"]];
-  receipts.forEach(r=>rows.push([r.supplier,r.vatNo,r.date,r.description,r.notes,fmt(r.net),fmt(r.vat),fmt(r.gross),r.method,r.audit]));
+  store.forEach(r => rows.push([
+    r.supplier, r.vatNo, r.date, r.description, r.notes,
+    fmt(r.net), fmt(r.vat), fmt(r.gross), r.method, r.audit
+  ]));
   const csv = rows.map(a=>a.map(x=>`"${String(x).replace(/"/g,'""')}"`).join(",")).join("\n");
-  const blob = new Blob([csv],{type:"text/csv"});
+  const blob = new Blob([csv], {type:"text/csv"});
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url; a.download = "receipts.csv"; a.click();
   URL.revokeObjectURL(url);
 });
 
-$("#btnClear").addEventListener("click", ()=>{
-  pendingRec = null;
-  ocrBox.textContent = "";
-  previewImg.removeAttribute("src");
-  setStatus("Ready for next receipt");
+$("#btnClear")?.addEventListener("click", ()=>{
+  // ONLY clear the current preview/OCR text — do NOT clear saved receipts
+  currentFile = null;
+  preview?.removeAttribute("src");
+  if(ocrText) ocrText.textContent = "";
+  status("Ready");
 });
 
-/* close modal if user taps backdrop */
-modal.addEventListener("click", e=>{ if(e.target===modal) closeManual(); });
+/* close modal by tapping backdrop */
+modal?.addEventListener("click", e=>{ if(e.target === modal) closeManual(); });
 
-/* ======= INIT ======= */
-renderTable();
-setStatus("Ready");
+/* initial */
+status("Ready");
