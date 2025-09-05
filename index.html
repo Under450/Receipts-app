@@ -12,13 +12,14 @@
   <div class="wrap">
     <h1>HMRC Receipt Extractor <small id="status">Ready</small></h1>
 
-    <!-- Controls -->
     <div class="box">
       <div class="row">
-        <input id="camera" type="file" accept="image/*" capture="environment" hidden>
-        <input id="library" type="file" accept="image/*" hidden>
-        <button id="btnCamera">📷 Take Photo</button>
-        <button id="btnLibrary">🖼️ Choose from Library</button>
+        <!-- File inputs (hidden) -->
+        <input id="camera" type="file" accept="image/*" capture="environment" />
+        <input id="library" type="file" accept="image/*" />
+        <!-- Labels trigger the inputs (iOS-safe) -->
+        <label for="camera" class="btn as-label">📷 Take Photo</label>
+        <label for="library" class="btn as-label">🖼️ Choose from Library</label>
         <button id="btnExtract" class="ghost">Extract</button>
         <button id="btnCSV" class="ghost">Export CSV</button>
         <button id="btnClear" class="ghost">Clear</button>
@@ -27,7 +28,6 @@
       <div id="ocrText"></div>
     </div>
 
-    <!-- Table -->
     <table>
       <thead>
         <tr>
@@ -46,7 +46,6 @@
     </table>
   </div>
 
-  <!-- Manual modal -->
   <div class="modal" id="modal">
     <div class="card">
       <h2>Manual Fix <small class="muted">Review &amp; Save</small></h2>
