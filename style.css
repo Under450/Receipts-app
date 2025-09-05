@@ -4,8 +4,9 @@ h1{margin:24px 0;text-align:center;color:var(--gold)}
 .wrap{max-width:980px;margin:0 auto;padding:12px}
 .box{border:2px dashed var(--gold);padding:14px;background:var(--panel);border-radius:10px}
 .row{display:flex;gap:12px;flex-wrap:wrap;align-items:center;justify-content:center}
-button,.btn{background:var(--gold);border:none;color:#000;padding:10px 14px;border-radius:8px;font-weight:600}
-.ghost{background:#333;color:#fff}
+button,.btn{background:var(--gold);border:none;color:#000;padding:10px 14px;border-radius:8px;font-weight:600;cursor:pointer}
+button.ghost{background:#333;color:#fff}
+.as-label{display:inline-block;cursor:pointer}
 small.muted{opacity:.8}
 #status{display:inline-block;margin-left:8px;color:#bbb}
 #preview{display:block;max-width:100%;max-height:380px;margin:12px auto;border-radius:6px}
@@ -15,12 +16,13 @@ th,td{border:1px solid #333;padding:10px}
 th{background:var(--gold);color:#000}
 tfoot td{font-weight:700}
 /* Modal */
-.modal{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:center;justify-content:center;padding:16px;z-index:1000;pointer-events:none;}
-.modal.show{display:flex;pointer-events:auto;}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:center;justify-content:center;padding:16px;z-index:1000;pointer-events:none}
+.modal.show{display:flex;pointer-events:auto}
 .card{background:#1b1b1b;border-radius:12px;max-width:780px;width:100%;max-height:92vh;overflow:auto;padding:16px;border:1px solid #333}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 label{font-weight:600;margin-top:8px;display:block}
 input,select,textarea{width:100%;background:#111;border:1px solid #444;border-radius:8px;padding:10px;color:#fff}
+input[type="file"]{display:none} /* keep inputs hidden, labels act as buttons */
 textarea{min-height:72px}
 .right{display:flex;gap:10px;justify-content:flex-end;margin-top:12px}
 @media (max-width:640px){.grid{grid-template-columns:1fr}}
