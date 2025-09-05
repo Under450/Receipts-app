@@ -28,10 +28,9 @@ render();
 /* ===== OCR ===== */
 const preview = $("#preview");
 const ocrText = $("#ocrText");
-let currentFile = null;
 
 async function runOCR(file){
-  currentFile = file;
+  if(!file) return;
   preview.src = URL.createObjectURL(file);
   ocrText.textContent = "";
   status("OCR: loading…");
@@ -42,10 +41,10 @@ async function runOCR(file){
   }catch(e){ alert("OCR error: "+e.message); status("OCR failed"); }
 }
 
-$("#btnCamera").onclick = ()=> $("#camera").click();
-$("#btnLibrary").onclick = ()=> $("#library").click();
+/* iOS-safe: inputs are triggered by labels; we only listen for change */
 ["camera","library"].forEach(id=>{
-  $("#"+id).addEventListener("change", e=>{
+  const el = $("#"+id);
+  el.addEventListener("change", e=>{
     const f = e.target.files && e.target.files[0];
     if(f) runOCR(f);
   });
@@ -114,7 +113,7 @@ function recalc(){
   else {
     if(hasG && !hasN && !hasV){ n=g/(1+r); v=g-n; }
     if(hasN && !hasG && !hasV){ g=n*(1+r); v=g-n; }
-    if(hasV && !hasN && !hasG){ g=v/r; n=g-v; }
+    if(hasV && !hasN && !hasG && r>0){ g=v/r; n=g-v; }
   }
   M.net.value=fmt(n); M.vat.value=fmt(v); M.gross.value=fmt(g);
 }
@@ -148,5 +147,5 @@ $("#btnCSV").onclick = ()=>{
   const blob = new Blob([csv],{type:"text/csv"}); const url = URL.createObjectURL(blob);
   const a = document.createElement("a"); a.href=url; a.download="receipts.csv"; a.click(); URL.revokeObjectURL(url);
 };
-$("#btnClear").onclick = ()=>{ currentFile=null; preview.removeAttribute("src"); ocrText.textContent=""; status("Ready"); };
-modal.addEventListener("click",e=>{ if(e.targe
+$("#btnClear").onclick = ()=>{ preview.removeAttribute("src"); ocrText.textContent=""; status("Ready"); };
+modal.addEventListener("click",e=>{ if(e.target===modal) closeManual(); });
